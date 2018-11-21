@@ -1,1 +1,3 @@
-# fuzz1ng
+# Fuzz1ng
+
+Experiments with various fuzzing strategies.
