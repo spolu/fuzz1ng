@@ -4,8 +4,6 @@ import random
 import time
 import typing
 
-from gym_fuzz1ng.coverage import Coverage
-
 from tensorboardX import SummaryWriter
 
 from utils.config import Config
@@ -75,30 +73,32 @@ class GeneticFuzzer:
     def __init__(
             self,
             config: Config,
+            runner: Runner,
+            runs_db: RunsDB,
     ) -> None:
         if config.get('tensorboard_log_dir') is not None:
             self.tb_writer = SummaryWriter(config.get('tensorboard_log_dir'))
 
-        self._runner = Runner(config)
+        self._runner = runner
+        self._runs_db = runs_db
 
         self._population = [Input(
             [self._runner.eof()]*self._runner.input_length(), 0, 10,
         )]
 
-        self._runs_db = RunsDB(config)
+        self._cycle_count = 0
 
     def cycle(
             self,
     ) -> None:
         start_time = time.time()
 
-        generation = Coverage()
-        coverages, generation = self._runner.run(
+        coverages, inputs, generation = self._runner.run(
             [i.input() for i in self._population],
         )
 
         for i in range(len(self._population)):
-            self._runs_db.store(self._population[i].input(), coverages[i])
+            self._runs_db.store(inputs[i], coverages[i])
 
         add = []
         remove = []
@@ -125,8 +125,10 @@ class GeneticFuzzer:
             self._population.remove(i)
 
         run_time = time.time() - start_time
+        self._cycle_count += 1
 
         Log.out("Cycle done", {
+            "cycle_count": self._cycle_count,
             "run_count": self._runs_db.run_count(),
             "population_count": len(self._population),
             "remove_count": len(remove),
@@ -135,6 +137,9 @@ class GeneticFuzzer:
             "unique_skip_pathes": self._runs_db.unique_skip_path_count(),
             "unique_count_pathes": self._runs_db.unique_count_path_count(),
         })
+
+        if self._cycle_count % 10 == 0:
+            self._runs_db.dump()
 
     def reproduce(
             self,
@@ -181,11 +186,18 @@ def run():
         'config_path',
         type=str, help="path to the config file",
     )
+    parser.add_argument(
+        'runs_db_path',
+        type=str, help="path to the runs db",
+    )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
+    runner = Runner(config)
 
-    fuzzer = GeneticFuzzer(config)
+    runs_db = RunsDB.from_file(args.runs_db_path, config, runner)
+
+    fuzzer = GeneticFuzzer(config, runner, runs_db)
 
     while True:
         fuzzer.cycle()

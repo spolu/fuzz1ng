@@ -29,16 +29,23 @@ class Runner:
 
     def run(
             self,
-            inputs: typing.List[bytes],
-    ) -> typing.Tuple[typing.List[Coverage], Coverage]:
+            inputs: typing.List[typing.List[int]],
+    ) -> typing.Tuple[
+        typing.List[Coverage],
+        typing.List[bytes],
+        Coverage
+    ]:
         start_time = time.time()
 
         coverages = []
+        bytes_inputs = []
         aggregate = Coverage()
 
         for i in inputs:
             _, _, _, info = self._env.step(np.array(i))
             coverages.append(info['step_coverage'])
+            bytes_inputs.append(info['input_data'])
+
             aggregate.add(info['step_coverage'])
 
         run_time = time.time() - start_time
@@ -49,4 +56,4 @@ class Runner:
             "exec_speed": '%.2f' % (len(inputs) / run_time),
         })
 
-        return coverages, aggregate
+        return coverages, bytes_inputs, aggregate
