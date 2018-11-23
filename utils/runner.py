@@ -20,12 +20,12 @@ class Runner:
     def eof(
             self,
     ) -> int:
-        return self._env.action_space.high[0]
+        return int(self._env.action_space.high[0])
 
     def input_length(
             self,
     ) -> int:
-        return self._env.action_space.shape[0]
+        return int(self._env.action_space.shape[0])
 
     def run(
             self,
@@ -38,13 +38,11 @@ class Runner:
         start_time = time.time()
 
         coverages = []
-        bytes_inputs = []
         aggregate = Coverage()
 
         for i in inputs:
             _, _, _, info = self._env.step(np.array(i))
             coverages.append(info['step_coverage'])
-            bytes_inputs.append(info['input_data'])
 
             aggregate.add(info['step_coverage'])
 
@@ -56,4 +54,4 @@ class Runner:
             "exec_speed": '%.2f' % (len(inputs) / run_time),
         })
 
-        return coverages, bytes_inputs, aggregate
+        return coverages, aggregate

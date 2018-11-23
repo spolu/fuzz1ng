@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import time
+import typing
 
 from gym_fuzz1ng.coverage import Coverage
 
@@ -20,7 +21,7 @@ class Pool:
 
     def store(
             self,
-            input: bytes,
+            input: typing.List[int],
     ) -> None:
         self._runs.append({
             'input': input,
@@ -30,10 +31,7 @@ class Pool:
     def __iter__(
             self,
     ):
-        yield 'runs', [
-            base64.b64encode(r['input']).decode('utf8')
-            for r in self._runs
-        ]
+        yield 'runs', [r['input'] for r in self._runs]
 
     @staticmethod
     def from_dict(
@@ -43,10 +41,7 @@ class Pool:
     ):
         pool = Pool(config)
 
-        inputs = [
-            base64.b64decode(r.encode('utf8'))
-            for r in spec['runs']
-        ]
+        inputs = [r for r in spec['runs']]
 
         for i in range(len(inputs)):
             pool.store(inputs[i])
@@ -74,7 +69,7 @@ class RunsDB:
 
     def store(
             self,
-            input: bytes,
+            input: typing.List[int],
             coverage: Coverage,
     ) -> None:
         assert len(coverage.skip_path_list()) == 1
@@ -113,7 +108,7 @@ class RunsDB:
         start_time = time.time()
 
         with open(self._dump_path, 'w') as out:
-            json.dump(dict(self), out, indent=2)
+            json.dump(dict(self), out)
 
         run_time = time.time() - start_time
 

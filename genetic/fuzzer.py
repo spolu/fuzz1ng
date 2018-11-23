@@ -1,6 +1,7 @@
 import argparse
 import copy
 import random
+import os
 import time
 import typing
 
@@ -93,12 +94,12 @@ class GeneticFuzzer:
     ) -> None:
         start_time = time.time()
 
-        coverages, inputs, generation = self._runner.run(
+        coverages, generation = self._runner.run(
             [i.input() for i in self._population],
         )
 
         for i in range(len(self._population)):
-            self._runs_db.store(inputs[i], coverages[i])
+            self._runs_db.store(self._population[i].input(), coverages[i])
 
         add = []
         remove = []
@@ -138,7 +139,7 @@ class GeneticFuzzer:
             "unique_count_pathes": self._runs_db.unique_count_path_count(),
         })
 
-        if self._cycle_count % 10 == 0:
+        if self._cycle_count % 100 == 0:
             self._runs_db.dump()
 
     def reproduce(
@@ -191,6 +192,8 @@ def run():
         type=str, help="path to the runs db",
     )
     args = parser.parse_args()
+
+    assert args.runs_db_path is None or not os.path.isfile(args.runs_db_path)
 
     config = Config.from_file(args.config_path)
     runner = Runner(config)
