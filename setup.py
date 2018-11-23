@@ -6,7 +6,8 @@ setup(
     install_requires=[
     ],
     packages=[
-        'database',
+        'genetic',
+        'utils',
     ],
     package_data={
     },
@@ -14,6 +15,7 @@ setup(
     entry_points={
         'console_scripts': [
             'genetic_fuzzer=genetic.fuzzer:run',
+            'afl_dump=utils.afl:dump',
         ],
     },
 )

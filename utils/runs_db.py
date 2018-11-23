@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import random
 import time
 import typing
 
@@ -27,6 +28,13 @@ class Pool:
             'input': input,
         })
         self._runs = self._runs[:self._pool_size]
+
+    def sample(
+            self,
+    ) -> typing.List[int]:
+        assert len(self._runs) > 0
+
+        return self._runs[random.randint(0, len(self._runs)-1)]['input']
 
     def __iter__(
             self,
@@ -116,6 +124,17 @@ class RunsDB:
             "run_time": '%.2f' % (run_time),
             "dump_path": self._dump_path,
         })
+
+    def sample(
+            self,
+    ) -> typing.List[typing.List[int]]:
+        inputs = []
+        for p in self._skip_pool:
+            inputs.append(self._skip_pool[p].sample())
+        for p in self._count_pool:
+            inputs.append(self._count_pool[p].sample())
+
+        return inputs
 
     def __iter__(
             self,

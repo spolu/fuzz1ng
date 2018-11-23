@@ -38,11 +38,13 @@ class Runner:
         start_time = time.time()
 
         coverages = []
+        inputs_data = []
         aggregate = Coverage()
 
         for i in inputs:
             _, _, _, info = self._env.step(np.array(i))
             coverages.append(info['step_coverage'])
+            inputs_data.append(info['input_data'])
 
             aggregate.add(info['step_coverage'])
 
@@ -54,4 +56,4 @@ class Runner:
             "exec_speed": '%.2f' % (len(inputs) / run_time),
         })
 
-        return coverages, aggregate
+        return coverages, inputs_data, aggregate

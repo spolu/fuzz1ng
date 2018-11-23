@@ -94,7 +94,7 @@ class GeneticFuzzer:
     ) -> None:
         start_time = time.time()
 
-        coverages, generation = self._runner.run(
+        coverages, _, generation = self._runner.run(
             [i.input() for i in self._population],
         )
 
@@ -197,7 +197,6 @@ def run():
 
     config = Config.from_file(args.config_path)
     runner = Runner(config)
-
     runs_db = RunsDB.from_file(args.runs_db_path, config, runner)
 
     fuzzer = GeneticFuzzer(config, runner, runs_db)
