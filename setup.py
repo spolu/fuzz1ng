@@ -13,7 +13,7 @@ setup(
     include_package_data=True,
     entry_points={
         'console_scripts': [
-            'test_fuzz1ng=database.test:run',
+            'genetic_fuzzer=genetic.fuzzer:run',
         ],
     },
 )

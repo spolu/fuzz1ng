@@ -1,0 +1,6 @@
+{
+  "gym_fuzz1ng_env": "FuzzWordLibPNG-v0",
+  "database_pool_size": 128,
+
+  "tensorboard_log_dir": null
+}
