@@ -11,6 +11,7 @@ from tensorboardX import SummaryWriter
 from utils.config import Config
 from utils.log import Log
 from utils.runner import Runner
+from utils.runs_db import RunsDB
 
 TRANSITION_ENERGY = 6.0
 INPUT_ENERGY = 1.0
@@ -79,20 +80,17 @@ class GeneticFuzzer:
             self.tb_writer = SummaryWriter(config.get('tensorboard_log_dir'))
 
         self._runner = Runner(config)
-        self._run_count = 0
 
         self._population = [Input(
             [self._runner.eof()]*self._runner.input_length(), 0, 10,
         )]
 
-        self._skip_pathes = {}
-        self._count_pathes = {}
+        self._runs_db = RunsDB(config)
 
     def cycle(
             self,
     ) -> None:
-        start = time.time()
-        start_run_count = self._run_count
+        start_time = time.time()
 
         generation = Coverage()
         coverages, generation = self._runner.run(
@@ -100,20 +98,10 @@ class GeneticFuzzer:
         )
 
         for i in range(len(self._population)):
-            for p in coverages[i].skip_path_list():
-                if p not in self._skip_pathes:
-                    self._skip_pathes[p] = 0
-                self._skip_pathes[p] += 1
+            self._runs_db.store(self._population[i].input(), coverages[i])
 
-            for p in coverages[i].count_path_list():
-                if p not in self._count_pathes:
-                    self._count_pathes[p] = 0
-                self._count_pathes[p] += 1
-
-            self._run_count += 1
-
-        remove = []
         add = []
+        remove = []
 
         for i in range(len(self._population)):
             delta = - (self._population[i].length() + 1) * INPUT_ENERGY
@@ -136,16 +124,16 @@ class GeneticFuzzer:
         for i in remove:
             self._population.remove(i)
 
-        delta = time.time() - start
+        run_time = time.time() - start_time
 
         Log.out("Cycle done", {
-            "run_count": self._run_count,
+            "run_count": self._runs_db.run_count(),
             "population_count": len(self._population),
             "remove_count": len(remove),
             "add_count": len(add),
-            "time": '%.2f'%(delta),
-            "unique_skip_pathes": len(self._skip_pathes),
-            "unique_count_pathes": len(self._count_pathes),
+            "run_time": '%.2f' % (run_time),
+            "unique_skip_pathes": self._runs_db.unique_skip_path_count(),
+            "unique_count_pathes": self._runs_db.unique_count_path_count(),
         })
 
     def reproduce(

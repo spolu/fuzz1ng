@@ -9,6 +9,7 @@ from gym_fuzz1ng.coverage import Coverage
 from utils.config import Config
 from utils.log import Log
 
+
 class Runner:
     def __init__(
             self,
@@ -30,7 +31,8 @@ class Runner:
             self,
             inputs: typing.List[bytes],
     ) -> typing.Tuple[typing.List[Coverage], Coverage]:
-        start = time.time()
+        start_time = time.time()
+
         coverages = []
         aggregate = Coverage()
 
@@ -39,12 +41,12 @@ class Runner:
             coverages.append(info['step_coverage'])
             aggregate.add(info['step_coverage'])
 
-        delta = time.time() - start
+        run_time = time.time() - start_time
 
         Log.out("Run done", {
             "run_count": len(inputs),
-            "time": '%.2f'%(delta),
-            "exec_speed": '%.2f'%(len(inputs) / delta),
+            "run_time": '%.2f' % (run_time),
+            "exec_speed": '%.2f' % (len(inputs) / run_time),
         })
 
         return coverages, aggregate
