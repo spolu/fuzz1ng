@@ -129,8 +129,7 @@ class RunsDB:
             self,
     ) -> typing.List[typing.List[int]]:
         inputs = []
-        for p in self._skip_pool:
-            inputs.append(self._skip_pool[p].sample())
+        # All runs in `_skip_pool` are necessarily in `_count_pool`.
         for p in self._count_pool:
             inputs.append(self._count_pool[p].sample())
 

@@ -2,6 +2,7 @@ import gym
 import gym_fuzz1ng  # noqa: F401
 import time
 import numpy as np
+import threading
 import typing
 
 from gym_fuzz1ng.coverage import Coverage
@@ -10,22 +11,74 @@ from utils.config import Config
 from utils.log import Log
 
 
+_send_condition = threading.Condition()
+_recv_condition = threading.Condition()
+_recv_count = 0
+
+
+class Worker(threading.Thread):
+    def __init__(self, config, index):
+        self._env = gym.make(config.get('gym_fuzz1ng_env'))
+        self._index = index
+
+        self.inputs = []
+
+        self.coverages = []
+        self.inputs_data = []
+        self.aggregate = Coverage()
+
+        threading.Thread.__init__(self)
+
+    def run(self):
+        global _send_condition
+        global _recv_condition
+        global _recv_count
+
+        while True:
+            # Wait for the controls to be set.
+            _send_condition.acquire()
+            _send_condition.wait()
+            _send_condition.release()
+
+            self.coverages = []
+            self.inputs_data = []
+            self.aggregate = Coverage()
+
+            for i in self.inputs:
+                _, _, _, info = self._env.step(np.array(i))
+
+                self.coverages.append(info['step_coverage'])
+                self.inputs_data.append(info['input_data'])
+                self.aggregate.add(info['step_coverage'])
+
+            # Notify that we are done.
+            _recv_condition.acquire()
+            _recv_count = _recv_count + 1
+            _recv_condition.notify_all()
+            _recv_condition.release()
+
+
 class Runner:
     def __init__(
             self,
             config: Config,
     ) -> None:
-        self._env = gym.make(config.get('gym_fuzz1ng_env'))
+        self._workers = [
+            Worker(config, i)
+            for i in range(config.get('runner_cpu_count'))
+        ]
+        for w in self._workers:
+            w.start()
 
     def eof(
             self,
     ) -> int:
-        return int(self._env.action_space.high[0])
+        return int(self._workers[0]._env.eof())
 
     def input_length(
             self,
     ) -> int:
-        return int(self._env.action_space.shape[0])
+        return int(self._workers[0]._env.action_space.shape[0])
 
     def run(
             self,
@@ -35,18 +88,46 @@ class Runner:
         typing.List[bytes],
         Coverage
     ]:
+        global _recv_count
+        global _send_condition
+        global _recv_condition
+
         start_time = time.time()
+
+        _recv_condition.acquire()
+        _recv_count = 0
+
+        for i in range(len(self._workers)):
+            w = self._workers[i]
+            b = int(i * len(inputs) / len(self._workers))
+            e = int((i+1) * len(inputs) / len(self._workers))
+            w.inputs = inputs[b:e]
+
+        for i in range(len(self._workers)):
+            # Release the workers.
+            _send_condition.acquire()
+            _send_condition.notify()
+            _send_condition.release()
+
+        # Wait for the workers to finish.
+        first = True
+        while _recv_count < len(self._workers):
+            if first:
+                first = False
+            else:
+                _recv_condition.acquire()
+            _recv_condition.wait()
+            _recv_condition.release()
 
         coverages = []
         inputs_data = []
         aggregate = Coverage()
 
-        for i in inputs:
-            _, _, _, info = self._env.step(np.array(i))
-            coverages.append(info['step_coverage'])
-            inputs_data.append(info['input_data'])
-
-            aggregate.add(info['step_coverage'])
+        for i in range(len(self._workers)):
+            w = self._workers[i]
+            coverages += w.coverages
+            inputs_data += w.inputs_data
+            aggregate.add(w.aggregate)
 
         run_time = time.time() - start_time
 
