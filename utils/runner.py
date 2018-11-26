@@ -2,6 +2,7 @@ import gym
 import gym_fuzz1ng  # noqa: F401
 import time
 import numpy as np
+import signal
 import threading
 import typing
 
@@ -14,12 +15,18 @@ from utils.log import Log
 _send_condition = threading.Condition()
 _recv_condition = threading.Condition()
 _recv_count = 0
+_runners = []
 
 
 class Worker(threading.Thread):
-    def __init__(self, config, index):
+    def __init__(
+            self,
+            config,
+            index,
+    ) -> None:
         self._env = gym.make(config.get('gym_fuzz1ng_env'))
         self._index = index
+        self._stop = False
 
         self.inputs = []
 
@@ -29,7 +36,15 @@ class Worker(threading.Thread):
 
         threading.Thread.__init__(self)
 
-    def run(self):
+    def stop(
+            self,
+    ) -> None:
+        # TODO(stan): fix this total hack
+        assert False
+
+    def run(
+            self,
+    ) -> None:
         global _send_condition
         global _recv_condition
         global _recv_count
@@ -63,12 +78,22 @@ class Runner:
             self,
             config: Config,
     ) -> None:
+        global _runners
+
         self._workers = [
             Worker(config, i)
             for i in range(config.get('runner_cpu_count'))
         ]
         for w in self._workers:
             w.start()
+
+        _runners.append(self)
+
+    def stop(
+            self,
+    ) -> None:
+        for w in self._workers:
+            w.stop()
 
     def eof(
             self,
@@ -138,3 +163,13 @@ class Runner:
         })
 
         return coverages, inputs_data, aggregate
+
+
+def signal_handler(signal, frame):
+    global _runners
+
+    for r in _runners:
+        r.stop()
+
+
+signal.signal(signal.SIGINT, signal_handler)

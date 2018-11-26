@@ -12,7 +12,7 @@ from utils.log import Log
 from utils.runner import Runner
 from utils.runs_db import RunsDB
 
-TRANSITION_ENERGY = 6.0
+TRANSITION_ENERGY = 10.0
 INPUT_ENERGY = 1.0
 
 REPRODUCTION_ENERGY_FACTOR = 3.0
