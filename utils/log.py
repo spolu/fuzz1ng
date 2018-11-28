@@ -1,4 +1,5 @@
 import datetime
+import sys
 import typing
 
 
@@ -16,3 +17,4 @@ class Log:
             message += " {}={}".format(k, data[k])
 
         print(message)
+        sys.stdout.flush()
