@@ -15,6 +15,7 @@ setup(
     entry_points={
         'console_scripts': [
             'genetic_fuzzer=genetic.fuzzer:run',
+            'runs_db_eval=utils.runs_db:eval',
             'afl_dump=utils.afl:dump',
         ],
     },

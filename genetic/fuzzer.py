@@ -1,7 +1,7 @@
 import argparse
 import copy
-import random
 import os
+import random
 import time
 import typing
 
@@ -137,8 +137,7 @@ class GeneticFuzzer:
             "remove_count": len(remove),
             "add_count": len(add),
             "run_time": '%.2f' % (run_time),
-            "skip_path_count": self._runs_db.unique_skip_path_count(),
-            "path_count": self._runs_db.unique_path_count(),
+            "path_count": self._runs_db.path_count(),
         })
 
         if self._cycle_count % 100 == 0:
@@ -190,16 +189,14 @@ def run():
         type=str, help="path to the config file",
     )
     parser.add_argument(
-        'runs_db_path',
-        type=str, help="path to the runs db",
+        '--runs_db_dir',
+        type=str, help="directory to dump the runs_db to",
     )
     args = parser.parse_args()
 
-    assert args.runs_db_path is None or not os.path.isfile(args.runs_db_path)
-
     config = Config.from_file(args.config_path)
     runner = Runner(config)
-    runs_db = RunsDB.from_file(args.runs_db_path, config, runner)
+    runs_db = RunsDB(config, os.path.expanduser(args.runs_db_dir))
 
     fuzzer = GeneticFuzzer(config, runner, runs_db)
 

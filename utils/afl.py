@@ -14,8 +14,8 @@ def dump():
         type=str, help="path to the config file",
     )
     parser.add_argument(
-        'runs_db_path',
-        type=str, help="path to the runs db",
+        'runs_db_dir',
+        type=str, help="directory of the runs_db",
     )
     parser.add_argument(
         'afl_input_dir',
@@ -23,11 +23,12 @@ def dump():
     )
     args = parser.parse_args()
 
-    assert args.runs_db_path is not None and os.path.isfile(args.runs_db_path)
-
     config = Config.from_file(args.config_path)
     runner = Runner(config)
-    runs_db = RunsDB.from_file(args.runs_db_path, config, runner)
+    runs_db = RunsDB.from_dump_dir(
+        os.path.expanduser(args.runs_db_dir),
+        config, runner,
+    )
 
     _, inputs_data, aggregate = runner.run(runs_db.sample())
 
