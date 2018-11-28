@@ -29,7 +29,7 @@ def dump():
     runner = Runner(config)
     runs_db = RunsDB.from_file(args.runs_db_path, config, runner)
 
-    _, inputs_data, _ = runner.run(runs_db.sample())
+    _, inputs_data, aggregate = runner.run(runs_db.sample())
 
     for i in range(len(inputs_data)):
         with open(

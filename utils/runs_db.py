@@ -71,8 +71,8 @@ class RunsDB:
         self._config = config
         self._dump_path = dump_path
 
+        self._pool = {}
         self._skip_pool = {}
-        self._count_pool = {}
         self._run_count = 0
 
     def store(
@@ -81,17 +81,17 @@ class RunsDB:
             coverage: Coverage,
     ) -> None:
         assert len(coverage.skip_path_list()) == 1
-        assert len(coverage.count_path_list()) == 1
+        assert len(coverage.path_list()) == 1
 
         skip_path = coverage.skip_path_list()[0]
         if skip_path not in self._skip_pool:
             self._skip_pool[skip_path] = Pool(self._config)
         self._skip_pool[skip_path].store(input)
 
-        count_path = coverage.count_path_list()[0]
-        if count_path not in self._count_pool:
-            self._count_pool[count_path] = Pool(self._config)
-        self._count_pool[count_path].store(input)
+        path = coverage.path_list()[0]
+        if path not in self._pool:
+            self._pool[path] = Pool(self._config)
+        self._pool[path].store(input)
 
         self._run_count += 1
 
@@ -105,10 +105,10 @@ class RunsDB:
     ) -> int:
         return len(self._skip_pool)
 
-    def unique_count_path_count(
+    def unique_path_count(
             self,
     ) -> int:
-        return len(self._count_pool)
+        return len(self._pool)
 
     def dump(
             self,
@@ -129,9 +129,9 @@ class RunsDB:
             self,
     ) -> typing.List[typing.List[int]]:
         inputs = []
-        # All runs in `_skip_pool` are necessarily in `_count_pool`.
-        for p in self._count_pool:
-            inputs.append(self._count_pool[p].sample())
+        # All runs in `_skip_pool` are necessarily in `_pool`.
+        for p in self._pool:
+            inputs.append(self._pool[p].sample())
 
         return inputs
 
@@ -142,13 +142,13 @@ class RunsDB:
         for p in self._skip_pool:
             key = base64.b64encode(p).decode('utf8')
             skip_pool[key] = dict(self._skip_pool[p])
-        count_pool = {}
-        for p in self._count_pool:
+        pool = {}
+        for p in self._pool:
             key = base64.b64encode(p).decode('utf8')
-            count_pool[key] = dict(self._count_pool[p])
+            pool[key] = dict(self._pool[p])
 
+        yield 'pool', pool
         yield 'skip_pool', skip_pool
-        yield 'count_pool', count_pool
         yield 'run_count', self._run_count
 
     @staticmethod
@@ -160,15 +160,15 @@ class RunsDB:
     ):
         runs_db = RunsDB(config, dump_path)
 
+        for p in spec['pool']:
+            key = base64.b64decode(p.encode('utf8'))
+            runs_db._pool[key] = Pool.from_dict(
+                spec['pool'][p], config, runner,
+            )
         for p in spec['skip_pool']:
             key = base64.b64decode(p.encode('utf8'))
             runs_db._skip_pool[key] = Pool.from_dict(
                 spec['skip_pool'][p], config, runner,
-            )
-        for p in spec['count_pool']:
-            key = base64.b64decode(p.encode('utf8'))
-            runs_db._count_pool[key] = Pool.from_dict(
-                spec['count_pool'][p], config, runner,
             )
         runs_db._run_count = spec['run_count']
 

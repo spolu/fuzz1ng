@@ -12,7 +12,7 @@ from utils.log import Log
 from utils.runner import Runner
 from utils.runs_db import RunsDB
 
-TRANSITION_ENERGY = 10.0
+TRANSITION_ENERGY = 12.0
 INPUT_ENERGY = 1.0
 
 REPRODUCTION_ENERGY_FACTOR = 3.0
@@ -83,15 +83,17 @@ class GeneticFuzzer:
         self._runner = runner
         self._runs_db = runs_db
 
-        self._population = [Input(
-            [self._runner.eof()]*self._runner.input_length(), 0, 10,
-        )]
-
+        self._population = []
         self._cycle_count = 0
 
     def cycle(
             self,
     ) -> None:
+        if len(self._population) == 0:
+            self._population = [Input(
+                [self._runner.eof()]*self._runner.input_length(), 0, 10,
+            )]
+
         start_time = time.time()
 
         coverages, _, generation = self._runner.run(
@@ -135,8 +137,8 @@ class GeneticFuzzer:
             "remove_count": len(remove),
             "add_count": len(add),
             "run_time": '%.2f' % (run_time),
-            "unique_skip_pathes": self._runs_db.unique_skip_path_count(),
-            "unique_count_pathes": self._runs_db.unique_count_path_count(),
+            "skip_path_count": self._runs_db.unique_skip_path_count(),
+            "path_count": self._runs_db.unique_path_count(),
         })
 
         if self._cycle_count % 100 == 0:
