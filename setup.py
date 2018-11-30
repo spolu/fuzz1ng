@@ -14,7 +14,8 @@ setup(
     include_package_data=True,
     entry_points={
         'console_scripts': [
-            'genetic_fuzzer=genetic.fuzzer:run',
+            'genetic_energy_fuzzer=genetic.energy:fuzz',
+            'genetic_simple_fuzzer=genetic.simple:fuzz',
             'transformer_trainer=transformer.trasnformer:train',
             'runs_db_eval=utils.runs_db:eval',
             'afl_dump=utils.afl:dump',
