@@ -33,10 +33,15 @@ class Pool:
 
     def sample(
             self,
+            count=1,
     ) -> typing.List[int]:
         assert len(self._runs) > 0
+        assert count < self._pool_size
 
-        return self._runs[random.randint(0, len(self._runs)-1)]['input']
+        return [
+            self._runs[random.randint(0, len(self._runs)-1)]['input']
+            for _ in range(count)
+        ]
 
 
 class RunsDB:
@@ -83,11 +88,12 @@ class RunsDB:
 
     def sample(
             self,
+            count=1,
     ) -> typing.List[typing.List[int]]:
         inputs = []
 
         for p in self._pools:
-            inputs.append(self._pools[p].sample())
+            inputs += self._pools[p].sample(count)
 
         return inputs
 
