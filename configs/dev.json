@@ -1,7 +1,6 @@
 {
-  "gym_fuzz1ng_env": "FuzzLibPNG-v0",
+  "gym_fuzz1ng_env": "FuzzChecksum_8_8-v0",
   "database_pool_size": 128,
-  "runner_cpu_count": 2,
 
   "tensorboard_log_dir": null
 }
