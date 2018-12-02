@@ -12,7 +12,7 @@ from utils.runner import Runner
 from utils.runs_db import RunsDB
 
 INSERTION_PROBABILITY = 0.05
-BYTE_FLIP_PROBABILITY = 0.2
+BYTE_FLIP_PROBABILITY = 0.1
 DELETION_PROBABILITY = 0.005
 
 
@@ -33,7 +33,7 @@ class SimpleFuzzer:
     def cycle(
             self,
     ) -> None:
-        population = self._runs_db.sample(32)
+        population = self._runs_db.sample(8)
 
         if len(population) == 0:
             population = [
