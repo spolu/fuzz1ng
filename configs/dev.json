@@ -1,6 +1,13 @@
 {
   "gym_fuzz1ng_env": "FuzzChecksum_8_8-v0",
+
   "database_pool_size": 128,
+  "database_pool_test_size": 16,
+
+  "transformer_batch_size": 8,
+
+  "transformer_load_dir": null,
+  "transformer_save_dir": null,
 
   "tensorboard_log_dir": null
 }

@@ -5,9 +5,12 @@ import os
 import random
 import shutil
 import time
+import torch
 import typing
 
 from gym_fuzz1ng.coverage import Coverage
+
+from torch.utils.data import Dataset
 
 from utils.config import Config
 from utils.log import Log
@@ -25,9 +28,11 @@ class Pool:
     def store(
             self,
             input: typing.List[int],
+            coverage: Coverage,
     ) -> None:
         self._runs.append({
             'input': input,
+            'coverage': coverage,
         })
         self._runs = self._runs[:self._pool_size]
 
@@ -72,7 +77,7 @@ class RunsDB:
         path = coverage.path_list()[0]
         if path not in self._pools:
             self._pools[path] = Pool(self._config)
-        self._pools[path].store(input)
+        self._pools[path].store(input, coverage)
 
         self._run_count += 1
 
@@ -161,10 +166,8 @@ class RunsDB:
 
         db._run_count = dump['run_count']
 
+        inputs = []
         for key in dump['pools']:
-            p = base64.urlsafe_b64decode(key.encode('utf8'))
-            db._pools[p] = Pool(config)
-
             pool_dir = os.path.join(dump_dir, '_pools', key)
             assert os.path.isdir(pool_dir)
 
@@ -174,9 +177,91 @@ class RunsDB:
             ]
             for path in runs:
                 with open(path, 'r') as f:
-                    db._pools[p].store(json.load(f))
+                    inputs.append(json.load(f))
+
+        coverages, _, _ = runner.run(inputs)
+
+        for i in range(len(inputs)):
+            db.store(inputs[i], coverages[i])
 
         return db
+
+
+class RunsDBDataset(Dataset):
+    def __init__(
+            self,
+            config: Config,
+            runs_db: RunsDB,
+            test: bool = False,
+    ) -> None:
+        self._config = config
+        self._runs_db = runs_db
+        self._test = test
+
+    def __len__(
+            self,
+    ) -> int:
+        test_size = self._config.get('database_pool_test_size')
+
+        test_count = 0
+        all_count = 0
+
+        for key in self._runs_db.pools:
+            pool_size = len(self._runs_db.pools[key]._runs)
+
+            pool_test = 0
+            pool_all = 0
+            if pool_size > 2 * test_size:
+                pool_test += test_size
+                pool_all += pool_size - test_size
+            else:
+                pool_all = pool_size
+
+            test_count += pool_test
+            all_count += pool_all
+
+        if self._test:
+            return test_count
+        else:
+            return all_count
+
+    def __getitem__(
+            self,
+            idx: int,
+    ):
+        test_size = self._config.get('database_pool_test_size')
+
+        run = None
+        for key in self._runs_db.pools:
+            pool_size = len(self._runs_db.pools[key]._runs)
+
+            pool_test = 0
+            pool_all = 0
+            if pool_size > 2 * test_size:
+                pool_test += test_size
+                pool_all += pool_size - test_size
+            else:
+                pool_all = pool_size
+
+            if self._test:
+                if pool_test > idx:
+                    run = self._runs_db.pools[key]._runs[idx]
+                    break
+                else:
+                    idx -= pool_test
+            else:
+                if pool_all > idx:
+                    run = self._runs_db.pools[key]._runs[idx]
+                    break
+                else:
+                    idx -= pool_all
+
+        assert run is not None
+
+        return (
+            torch.LongTensor(run['input']),
+            torch.LongTensor(run['coverage'].observation()),
+        )
 
 
 def eval():
@@ -194,9 +279,7 @@ def eval():
 
     config = Config.from_file(args.config_path)
     runner = Runner(config)
-    runs_db = RunsDB.from_dump_dir(
+    RunsDB.from_dump_dir(
         os.path.expanduser(args.runs_db_dir),
         config, runner,
     )
-
-    _, inputs_data, aggregate = runner.run(runs_db.sample())

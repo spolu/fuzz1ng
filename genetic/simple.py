@@ -92,14 +92,18 @@ def fuzz():
         type=str, help="path to the config file",
     )
     parser.add_argument(
-        '--runs_db_dir',
-        type=str, help="directory to dump the runs_db to",
+        'runs_db_dir',
+        type=str, help="directory to the runs_db",
     )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
     runner = Runner(config)
-    runs_db = RunsDB(config, os.path.expanduser(args.runs_db_dir))
+    # runs_db = RunsDB(config, os.path.expanduser(args.runs_db_dir))
+    runs_db = RunsDB.from_dump_dir(
+        os.path.expanduser(args.runs_db_dir),
+        config, runner,
+    )
 
     fuzzer = SimpleFuzzer(config, runner, runs_db)
 
