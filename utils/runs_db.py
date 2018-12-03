@@ -155,12 +155,17 @@ class RunsDB:
             runner: Runner,
     ):
         assert os.path.isdir(dump_dir)
-        assert os.path.isdir(os.path.join(dump_dir, '_pools'))
-        assert os.path.isfile(os.path.join(dump_dir, 'runs_db.json'))
 
-        dump = None
-        with open(os.path.join(dump_dir, 'runs_db.json'), 'r') as f:
-            dump = json.load(f)
+        if not os.path.isdir(os.path.join(dump_dir, '_pools')):
+            os.mkdir(os.path.join(dump_dir, '_pools'))
+
+        dump = {
+            'pools': {},
+            'run_count': 0,
+        }
+        if os.path.isfile(os.path.join(dump_dir, 'runs_db.json')):
+            with open(os.path.join(dump_dir, 'runs_db.json'), 'r') as f:
+                dump = json.load(f)
 
         db = RunsDB(config, dump_dir)
 
@@ -198,6 +203,8 @@ class RunsDBDataset(Dataset):
         self._runs_db = runs_db
         self._test = test
 
+        self._device = torch.device(config.get('device'))
+
     def __len__(
             self,
     ) -> int:
@@ -206,8 +213,8 @@ class RunsDBDataset(Dataset):
         test_count = 0
         all_count = 0
 
-        for key in self._runs_db.pools:
-            pool_size = len(self._runs_db.pools[key]._runs)
+        for key in self._runs_db._pools:
+            pool_size = len(self._runs_db._pools[key]._runs)
 
             pool_test = 0
             pool_all = 0
@@ -232,8 +239,8 @@ class RunsDBDataset(Dataset):
         test_size = self._config.get('database_pool_test_size')
 
         run = None
-        for key in self._runs_db.pools:
-            pool_size = len(self._runs_db.pools[key]._runs)
+        for key in self._runs_db._pools:
+            pool_size = len(self._runs_db._pools[key]._runs)
 
             pool_test = 0
             pool_all = 0
@@ -245,13 +252,13 @@ class RunsDBDataset(Dataset):
 
             if self._test:
                 if pool_test > idx:
-                    run = self._runs_db.pools[key]._runs[idx]
+                    run = self._runs_db._pools[key]._runs[idx]
                     break
                 else:
                     idx -= pool_test
             else:
                 if pool_all > idx:
-                    run = self._runs_db.pools[key]._runs[idx]
+                    run = self._runs_db._pools[key]._runs[idx]
                     break
                 else:
                     idx -= pool_all
@@ -259,8 +266,8 @@ class RunsDBDataset(Dataset):
         assert run is not None
 
         return (
-            torch.LongTensor(run['input']),
-            torch.LongTensor(run['coverage'].observation()),
+            torch.LongTensor(run['input']).to(self._device),
+            torch.FloatTensor(run['coverage'].observation()).to(self._device),
         )
 
 

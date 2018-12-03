@@ -226,11 +226,12 @@ class CoverageModel(nn.Module):
 
         self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
+        self.intermediate_size = config.get('transformer_intermediate_size')
         self.attention_head_count = \
             config.get('transformer_attention_head_count')
 
         layers = [
-            nn.Embedding(dict_size, 64),
+            nn.Embedding(dict_size, self.embedding_size),
             nn.Linear(self.embedding_size, self.hidden_size),
             Transformer(
                 self.hidden_size,
@@ -265,7 +266,7 @@ class CoverageModel(nn.Module):
 
 if __name__ == "__main__":
     transformer = Transformer(256, 8, 512)
-    transducer = Transducer(9, 5)
+    transducer = Transducer(13, 7)
 
-    out = transformer(torch.ones(4, 9, 256))
+    out = transformer(torch.ones(4, 13, 256))
     fin = transducer(out)

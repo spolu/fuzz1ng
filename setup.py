@@ -16,7 +16,7 @@ setup(
         'console_scripts': [
             'genetic_energy_fuzzer=genetic.energy:fuzz',
             'genetic_simple_fuzzer=genetic.simple:fuzz',
-            'transformer_trainer=transformer.trasnformer:train',
+            'transformer_trainer=transformer.transformer:train',
             'runs_db_eval=utils.runs_db:eval',
             'afl_dump=utils.afl:dump',
         ],

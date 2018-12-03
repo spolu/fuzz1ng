@@ -23,6 +23,16 @@ class Runner:
     ) -> int:
         return int(self._env.eof())
 
+    def dict_size(
+            self,
+    ) -> int:
+        return int(self._env.dict_size())
+
+    def input_size(
+            self,
+    ) -> int:
+        return int(self._env.input_size())
+
     def input_length(
             self,
     ) -> int:
