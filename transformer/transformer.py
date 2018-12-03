@@ -109,8 +109,6 @@ class Coverage:
                 "train/loss/coverage", loss_meter.avg, self._batch_count,
             )
 
-        self._batch_count += 1
-
         if (self._batch_count+1) % 10 == 0:
             test_loss = self.batch_test()
 
@@ -129,6 +127,8 @@ class Coverage:
                         self._coverage_optimizer.state_dict(),
                         self._save_dir + "/coverage_optimizer.pt",
                     )
+
+        self._batch_count += 1
 
     def batch_test(
             self,
