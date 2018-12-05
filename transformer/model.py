@@ -215,6 +215,23 @@ class Transducer(nn.Module):
         return torch.matmul(self.weight, input_tensor)
 
 
+class FixedEmbedding(nn.Module):
+    def __init__(
+            self,
+            config,
+            dict_size,
+    ):
+        super(FixedEmbedding, self).__init__()
+
+        self.embedding_size = config.get('transformer_embedding_size')
+        self.embedding = nn.Embedding(dict_size, self.embedding_size)
+
+    def forward(self, inputs):
+        pres = self.embedding(inputs)
+        embeds = pres / torch.sum(pres, -1, keepdim=True)
+        return embeds
+
+
 class Coverage(nn.Module):
     def __init__(
             self,
@@ -231,7 +248,6 @@ class Coverage(nn.Module):
             config.get('transformer_attention_head_count')
 
         layers = [
-            nn.Embedding(dict_size, self.embedding_size),
             nn.Linear(self.embedding_size, self.hidden_size),
             Transformer(
                 self.hidden_size,
@@ -259,8 +275,8 @@ class Coverage(nn.Module):
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, inputs):
-        coverages = self.layers(inputs)
+    def forward(self, embeds):
+        coverages = self.layers(embeds)
         return coverages
 
 
@@ -273,13 +289,16 @@ class Generator(nn.Module):
     ):
         super(Generator, self).__init__()
 
+        self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
         self.intermediate_size = config.get('transformer_intermediate_size')
         self.attention_head_count = \
             config.get('transformer_attention_head_count')
 
+        self.embed = nn.Linear(self.embedding_size, self.hidden_size)
+        self.coverage = nn.Linear(256, self.hidden_size)
+
         layers = [
-            nn.Linear(256, self.hidden_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -290,7 +309,7 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            Transducer(256, input_size),
+            Transducer(input_size + 256, input_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -301,15 +320,16 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            nn.Linear(self.hidden_size, dict_size),
-            nn.Softmax(dim=-1),
+            nn.Linear(self.hidden_size, self.embedding_size),
         ]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, coverages):
-        inputs = self.layers(coverages)
-        return inputs
+    def forward(self, embeds, targets):
+        hiddens = torch.cat([self.embed(embeds), self.coverage(targets)], 1)
+        pres = self.layers(hiddens)
+        embeds = pres / torch.sum(pres, -1, keepdim=True)
+        return embeds
 
 
 if __name__ == "__main__":

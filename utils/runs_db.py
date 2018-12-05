@@ -201,11 +201,16 @@ class RunsDBDataset(Dataset):
             self,
             config: Config,
             runs_db: RunsDB,
+            dict_size: int,
+            input_size: int,
             test: bool = False,
     ) -> None:
         self._config = config
         self._runs_db = runs_db
         self._test = test
+
+        self._input_size = input_size
+        self._dict_size = dict_size
 
         self._device = torch.device(config.get('device'))
 
