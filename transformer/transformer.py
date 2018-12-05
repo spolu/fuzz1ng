@@ -264,8 +264,9 @@ class Transformer:
             estimated = self._coverage_policy(generated)
 
             target_loss = F.mse_loss(estimated, targets)
-            input_loss = F.cosine_similarity(embeds, generated, 2).sum() / \
-                (embeds.size(0) * embeds.size(1))
+            input_loss = (1.0 - F.cosine_similarity(
+                embeds, generated, 2
+            )).sum() / (embeds.size(0) * embeds.size(1))
 
             self._generator_optimizer.zero_grad()
             (target_loss + 0.01 * input_loss).backward()
