@@ -70,16 +70,20 @@ class RunsDB:
             self,
             input: typing.List[int],
             coverage: Coverage,
-    ) -> None:
+    ) -> bool:
         assert len(coverage.skip_path_list()) == 1
         assert len(coverage.path_list()) == 1
 
+        new_path = False
         path = coverage.path_list()[0]
         if path not in self._pools:
+            new_path = True
             self._pools[path] = Pool(self._config)
+
         self._pools[path].store(input, coverage)
 
         self._run_count += 1
+        return new_path
 
     def run_count(
             self,

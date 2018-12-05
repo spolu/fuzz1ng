@@ -3,6 +3,7 @@ import gym_fuzz1ng  # noqa: F401
 import time
 import numpy as np
 import signal
+import sys
 import typing
 
 from gym_fuzz1ng.coverage import Coverage
@@ -76,7 +77,7 @@ class Runner:
 
 
 def signal_handler(signal, frame):
-    pass
+    sys.exit(0)
 
 
 signal.signal(signal.SIGINT, signal_handler)

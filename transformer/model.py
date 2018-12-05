@@ -215,14 +215,14 @@ class Transducer(nn.Module):
         return torch.matmul(self.weight, input_tensor)
 
 
-class CoverageModel(nn.Module):
+class Coverage(nn.Module):
     def __init__(
             self,
             config,
             dict_size,
             input_size,
     ):
-        super(CoverageModel, self).__init__()
+        super(Coverage, self).__init__()
 
         self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
@@ -259,9 +259,57 @@ class CoverageModel(nn.Module):
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, input):
-        out = self.layers(input)
-        return out
+    def forward(self, inputs):
+        coverages = self.layers(inputs)
+        return coverages
+
+
+class Generator(nn.Module):
+    def __init__(
+            self,
+            config,
+            dict_size,
+            input_size,
+    ):
+        super(Generator, self).__init__()
+
+        self.hidden_size = config.get('transformer_hidden_size')
+        self.intermediate_size = config.get('transformer_intermediate_size')
+        self.attention_head_count = \
+            config.get('transformer_attention_head_count')
+
+        layers = [
+            nn.Linear(256, self.hidden_size),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transducer(256, input_size),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            nn.Linear(self.hidden_size, dict_size),
+            nn.Softmax(dim=-1),
+        ]
+
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, coverages):
+        inputs = self.layers(coverages)
+        return inputs
 
 
 if __name__ == "__main__":

@@ -4,9 +4,12 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
+
 from tensorboardX import SummaryWriter
 
-from transformer.model import CoverageModel
+from torch.distributions import Categorical
+
+from transformer.model import Coverage, Generator
 
 from utils.config import Config
 from utils.meter import Meter
@@ -15,7 +18,7 @@ from utils.runner import Runner
 from utils.runs_db import RunsDB, RunsDBDataset
 
 
-class Coverage:
+class Transformer:
     def __init__(
             self,
             config: Config,
@@ -50,14 +53,27 @@ class Coverage:
             num_workers=0,
         )
 
-        self._coverage_policy = CoverageModel(
+        self._coverage_policy = Coverage(
             self._config,
             self._runner.dict_size(),
             self._runner.input_size(),
         ).to(self._device)
-
         self._coverage_optimizer = optim.Adam(
             self._coverage_policy.parameters(),
+            lr=self._config.get('transformer_learning_rate'),
+            betas=(
+                self._config.get('transformer_adam_beta_1'),
+                self._config.get('transformer_adam_beta_2'),
+            ),
+        )
+
+        self._generator_policy = Generator(
+            self._config,
+            self._runner.dict_size(),
+            self._runner.input_size(),
+        ).to(self._device)
+        self._generator_optimizer = optim.Adam(
+            self._generator_policy.parameters(),
             lr=self._config.get('transformer_learning_rate'),
             betas=(
                 self._config.get('transformer_adam_beta_1'),
@@ -78,13 +94,26 @@ class Coverage:
                     map_location=self._device,
                 ),
             )
+            self._generator_policy.load_state_dict(
+                torch.load(
+                    self._load_dir + "/generator_policy.pt",
+                    map_location=self._device,
+                ),
+            )
+            self._generator_optimizer.load_state_dict(
+                torch.load(
+                    self._load_dir + "/generator_optimizer.pt",
+                    map_location=self._device,
+                ),
+            )
 
-        self._batch_count = 0
-        self._best_test_loss = 999
+        self._coverage_batch_count = 0
+        self._coverage_best_test_loss = 999
 
-    def batch_train(self):
+        self._generator_batch_count = 0
+
+    def batch_train_coverage(self):
         self._coverage_policy.train()
-
         loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
@@ -97,8 +126,8 @@ class Coverage:
 
             loss_meter.update(loss.item())
 
-        Log.out("BATCH TRAIN", {
-            'batch_count': self._batch_count,
+        Log.out("COVERAGE TRAIN", {
+            'batch_count': self._coverage_batch_count,
             'loss_avg': loss_meter.avg,
             'loss_min': loss_meter.min,
             'loss_max': loss_meter.max,
@@ -106,14 +135,15 @@ class Coverage:
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
-                "train/loss/coverage", loss_meter.avg, self._batch_count,
+                "train/loss/coverage",
+                loss_meter.avg, self._coverage_batch_count,
             )
 
-        if (self._batch_count+1) % 10 == 0:
-            test_loss = self.batch_test()
+        if (self._coverage_batch_count+1) % 10 == 0:
+            test_loss = self.batch_test_coverage()
 
-            if test_loss < self._best_test_loss:
-                self._best_test_loss = test_loss
+            if test_loss < self._coverage_best_test_loss:
+                self._coverage_best_test_loss = test_loss
                 if self._save_dir:
                     Log.out(
                         "Saving policy and optimizer", {
@@ -128,9 +158,9 @@ class Coverage:
                         self._save_dir + "/coverage_optimizer.pt",
                     )
 
-        self._batch_count += 1
+        self._coverage_batch_count += 1
 
-    def batch_test(
+    def batch_test_coverage(
             self,
     ):
         self._coverage_policy.eval()
@@ -143,14 +173,74 @@ class Coverage:
 
                 loss_meter.update(loss.item())
 
-        Log.out("BATCH TEST", {
-            'batch_count': self._batch_count,
+        Log.out("COVERAGE TEST", {
+            'batch_count': self._coverage_batch_count,
             'loss_avg': loss_meter.avg,
             'loss_min': loss_meter.min,
             'loss_max': loss_meter.max,
         })
 
         return loss_meter.avg
+
+    def batch_train_generator(
+            self,
+    ):
+        self._generator_policy.train()
+        self._coverage_policy.eval()
+        loss_meter = Meter()
+
+        for it, (inputs, coverages) in enumerate(self._train_loader):
+            probs = self._generator_policy(coverages)
+
+            m = Categorical(probs)
+            generated = m.sample()
+
+            estimated = self._coverage_policy(generated)
+            loss = F.mse_loss(estimated, coverages)
+
+            self._generator_optimizer.zero_grad()
+            loss.backward()
+            self._generator_optimizer.step()
+
+            loss_meter.update(loss.item())
+
+        Log.out("GENERATOR TRAIN", {
+            'batch_count': self._generator_batch_count,
+            'loss_avg': loss_meter.avg,
+            'loss_min': loss_meter.min,
+            'loss_max': loss_meter.max,
+        })
+
+        if self._tb_writer is not None:
+            self._tb_writer.add_scalar(
+                "train/loss/generator",
+                loss_meter.avg, self._generator_batch_count,
+            )
+
+        self._generator_batch_count += 1
+
+    # def batch_test_generator(
+    #         self,
+    # ):
+    #     self._generator_policy.eval()
+    #     loss_meter = Meter()
+
+    #     with torch.no_grad():
+    #         for it, (inputs, coverages) in enumerate(self._test_loader):
+    #             probs = self._generator_policy(coverages)
+    #             generated = self._coverage_policy(inputs)
+    #             loss = F.mse_loss(generated, coverages)
+
+    #             loss_meter.update(loss.item())
+
+    #     Log.out("COVERAGE TEST", {
+    #         'batch_count': self._coverage_batch_count,
+    #         'loss_avg': loss_meter.avg,
+    #         'loss_min': loss_meter.min,
+    #         'loss_max': loss_meter.max,
+    #     })
+
+    #     return loss_meter.avg
 
 
 def train():
@@ -180,6 +270,10 @@ def train():
         '--tensorboard_log_dir',
         type=str, help="config override",
     )
+    parser.add_argument(
+        '--gym_fuzz1ng_env',
+        type=str, help="config override",
+    )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
@@ -201,6 +295,11 @@ def train():
             'transformer_save_dir',
             os.path.expanduser(args.transformer_save_dir),
         )
+    if args.gym_fuzz1ng_env is not None:
+        config.override(
+            'gym_fuzz1ng_env',
+            args.gym_fuzz1ng_env,
+        )
 
     runner = Runner(config)
     runs_db = RunsDB.from_dump_dir(
@@ -208,6 +307,7 @@ def train():
         config, runner,
     )
 
-    coverage = Coverage(config, runner, runs_db)
+    transformer = Transformer(config, runner, runs_db)
     while True:
-        coverage.batch_train()
+        transformer.batch_train_coverage()
+        transformer.batch_train_generator()

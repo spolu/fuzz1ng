@@ -11,9 +11,9 @@ from utils.log import Log
 from utils.runner import Runner
 from utils.runs_db import RunsDB
 
-INSERTION_PROBABILITY = 0.05
-BYTE_FLIP_PROBABILITY = 0.1
-DELETION_PROBABILITY = 0.005
+INSERTION_PROBABILITY = 0.005
+BYTE_FLIP_PROBABILITY = 0.12
+DELETION_PROBABILITY = 0.001
 
 
 class SimpleFuzzer:
@@ -26,6 +26,8 @@ class SimpleFuzzer:
         if config.get('tensorboard_log_dir') is not None:
             self.tb_writer = SummaryWriter(config.get('tensorboard_log_dir'))
 
+        self.sample_count = config.get('genetic_simple_sample_count')
+
         self._runner = runner
         self._runs_db = runs_db
         self._cycle_count = 0
@@ -33,7 +35,7 @@ class SimpleFuzzer:
     def cycle(
             self,
     ) -> None:
-        population = self._runs_db.sample(8)
+        population = self._runs_db.sample(self.sample_count)
 
         if len(population) == 0:
             population = [
@@ -95,9 +97,29 @@ def fuzz():
         'runs_db_dir',
         type=str, help="directory to the runs_db",
     )
+    parser.add_argument(
+        '--gym_fuzz1ng_env',
+        type=str, help="config override",
+    )
+    parser.add_argument(
+        '--genetic_simple_sample_count',
+        type=int, help="config override",
+    )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
+
+    if args.gym_fuzz1ng_env is not None:
+        config.override(
+            'gym_fuzz1ng_env',
+            args.gym_fuzz1ng_env,
+        )
+    if args.genetic_simple_sample_count is not None:
+        config.override(
+            'genetic_simple_sample_count',
+            args.genetic_simple_sample_count,
+        )
+
     runner = Runner(config)
     # runs_db = RunsDB(config, os.path.expanduser(args.runs_db_dir))
     runs_db = RunsDB.from_dump_dir(

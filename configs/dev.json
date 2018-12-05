@@ -1,5 +1,7 @@
 {
-  "gym_fuzz1ng_env": "FuzzChecksum_8_8-v0",
+  "gym_fuzz1ng_env": "FuzzLibPNG-v0",
+
+  "genetic_simple_sample_count": 1,
 
   "database_pool_size": 128,
   "database_pool_test_size": 16,
