@@ -5,10 +5,9 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-
 from tensorboardX import SummaryWriter
 
-from transformer.model import FixedEmbedding, Coverage, Generator
+from transformer.model import Coverage, Generator
 
 from utils.config import Config
 from utils.meter import Meter
@@ -425,6 +424,8 @@ def train():
     while True:
         if i % 10 == 0:
             transformer.batch_test_coverage()
+
+        if i % 2 == 0:
             transformer.save_models()
 
         transformer.batch_train_coverage()

@@ -71,7 +71,9 @@ class RunsDB:
             input: typing.List[int],
             coverage: Coverage,
     ) -> bool:
-        assert len(coverage.skip_path_list()) == 1
+        if coverage.crash_count() == 1:
+            return False
+
         assert len(coverage.path_list()) == 1
 
         new_path = False
