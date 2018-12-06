@@ -40,30 +40,6 @@ class Transformer:
                 self._config.get('tensorboard_log_dir'),
             )
 
-        self._train_loader = torch.utils.data.DataLoader(
-            RunsDBDataset(
-                self._config,
-                self._runs_db,
-                self._runner.dict_size(),
-                self._runner.input_size(),
-                test=False
-            ),
-            batch_size=self._config.get('transformer_batch_size'),
-            shuffle=True,
-            num_workers=0,
-        )
-        self._test_loader = torch.utils.data.DataLoader(
-            RunsDBDataset(
-                self._config,
-                self._runs_db,
-                self._runner.dict_size(),
-                self._runner.input_size(),
-                test=True),
-            batch_size=self._config.get('transformer_batch_size'),
-            shuffle=False,
-            num_workers=0,
-        )
-
         self._coverage_policy = Coverage(
             self._config,
             self._runner.dict_size(),
@@ -121,6 +97,35 @@ class Transformer:
         self._coverage_batch_count = 0
         self._generator_batch_count = 0
         self._generate_batch_count = 0
+
+        self.reload_datasets()
+
+    def reload_datasets(
+            self,
+    ):
+        self._train_loader = torch.utils.data.DataLoader(
+            RunsDBDataset(
+                self._config,
+                self._runs_db,
+                self._runner.dict_size(),
+                self._runner.input_size(),
+                test=False
+            ),
+            batch_size=self._config.get('transformer_batch_size'),
+            shuffle=True,
+            num_workers=0,
+        )
+        self._test_loader = torch.utils.data.DataLoader(
+            RunsDBDataset(
+                self._config,
+                self._runs_db,
+                self._runner.dict_size(),
+                self._runner.input_size(),
+                test=True),
+            batch_size=self._config.get('transformer_batch_size'),
+            shuffle=False,
+            num_workers=0,
+        )
 
     def save_models(
             self,
@@ -423,7 +428,9 @@ def train():
     i = 0
     while True:
         if i % 10 == 0:
-            transformer.batch_test_coverage()
+            # transformer.batch_test_coverage()
+            runs_db.dump()
+            transformer.reload_datasets()
 
         if i % 2 == 0:
             transformer.save_models()
