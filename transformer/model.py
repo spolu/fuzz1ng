@@ -241,14 +241,13 @@ class Coverage(nn.Module):
     ):
         super(Coverage, self).__init__()
 
-        self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
         self.intermediate_size = config.get('transformer_intermediate_size')
         self.attention_head_count = \
             config.get('transformer_attention_head_count')
 
         layers = [
-            nn.Linear(self.embedding_size, self.hidden_size),
+            nn.Linear(dict_size, self.hidden_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -295,7 +294,7 @@ class Generator(nn.Module):
         self.attention_head_count = \
             config.get('transformer_attention_head_count')
 
-        self.embed = nn.Linear(self.embedding_size, self.hidden_size)
+        self.input = nn.Linear(dict_size, self.hidden_size)
         self.coverage = nn.Linear(256, self.hidden_size)
 
         layers = [
@@ -309,7 +308,7 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            Transducer(input_size + 256, input_size),
+            Transducer(input_size + 2 * 256, input_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -320,16 +319,20 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            nn.Linear(self.hidden_size, self.embedding_size),
+            nn.Linear(self.hidden_size, dict_size),
+            nn.Softmax(-1),
         ]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, embeds, targets):
-        hiddens = torch.cat([self.embed(embeds), self.coverage(targets)], 1)
-        pres = self.layers(hiddens)
-        embeds = pres / torch.sum(pres, -1, keepdim=True)
-        return embeds
+    def forward(self, inputs, coverages, targets):
+        hiddens = torch.cat([
+            self.input(inputs),
+            self.coverage(coverages),
+            self.coverage(targets),
+        ], 1)
+        outputs = self.layers(hiddens)
+        return outputs
 
 
 if __name__ == "__main__":

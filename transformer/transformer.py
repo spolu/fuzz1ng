@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -32,6 +33,8 @@ class Transformer:
         self._save_dir = config.get('transformer_save_dir')
         self._load_dir = config.get('transformer_load_dir')
 
+        self._target_size = self._config.get('transformer_target_size')
+
         self._tb_writer = None
         if self._config.get('tensorboard_log_dir'):
             self._tb_writer = SummaryWriter(
@@ -62,11 +65,6 @@ class Transformer:
             num_workers=0,
         )
 
-        self._fixed_embedding = FixedEmbedding(
-            self._config,
-            self._runner.dict_size(),
-        ).to(self._device)
-
         self._coverage_policy = Coverage(
             self._config,
             self._runner.dict_size(),
@@ -96,12 +94,6 @@ class Transformer:
         )
 
         if self._load_dir:
-            self._fixed_embedding.load_state_dict(
-                torch.load(
-                    self._load_dir + "/fixed_embedding.pt",
-                    map_location=self._device,
-                ),
-            )
             self._coverage_policy.load_state_dict(
                 torch.load(
                     self._load_dir + "/coverage_policy.pt",
@@ -129,6 +121,7 @@ class Transformer:
 
         self._coverage_batch_count = 0
         self._generator_batch_count = 0
+        self._generate_batch_count = 0
 
     def save_models(
             self,
@@ -138,10 +131,6 @@ class Transformer:
                 "Saving models", {
                     'save_dir': self._save_dir,
                 })
-            torch.save(
-                self._fixed_embedding.state_dict(),
-                self._save_dir + "/fixed_embedding.pt",
-            )
             torch.save(
                 self._coverage_policy.state_dict(),
                 self._save_dir + "/coverage_policy.pt",
@@ -160,13 +149,11 @@ class Transformer:
             )
 
     def batch_train_coverage(self):
-        self._fixed_embedding.eval()
         self._coverage_policy.train()
         loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
-            embeds = self._fixed_embedding(inputs)
-            generated = self._coverage_policy(embeds)
+            generated = self._coverage_policy(inputs)
             loss = F.mse_loss(generated, coverages)
 
             self._coverage_optimizer.zero_grad()
@@ -193,14 +180,12 @@ class Transformer:
     def batch_test_coverage(
             self,
     ):
-        self._fixed_embedding.eval()
         self._coverage_policy.eval()
         loss_meter = Meter()
 
         with torch.no_grad():
             for it, (inputs, coverages) in enumerate(self._test_loader):
-                embeds = self._fixed_embedding(inputs)
-                generated = self._coverage_policy(embeds)
+                generated = self._coverage_policy(inputs)
                 loss = F.mse_loss(generated, coverages)
 
                 loss_meter.update(loss.item())
@@ -224,31 +209,42 @@ class Transformer:
         assert inputs.size(0) == coverages.size(0)
         batch_size = inputs.size(0)
 
-        expanded = torch.zeros(
-            batch_size * batch_size,
+        expanded_inputs = torch.zeros(
+            batch_size * self._target_size,
             inputs.size(1),
-            dtype=torch.int64,
+            inputs.size(2),
         ).to(self._device)
 
-        targets = torch.zeros(
-            coverages.size(0) * coverages.size(0),
+        expanded_coverages = torch.zeros(
+            batch_size * self._target_size,
             coverages.size(1),
             coverages.size(2),
         ).to(self._device)
 
+        targets = torch.zeros(
+            batch_size * self._target_size,
+            coverages.size(1),
+            coverages.size(2),
+        ).to(self._device)
+
+        targets_idx = [
+            random.randint(0, batch_size-1)
+            for _ in range(self._target_size)
+        ]
+
         for i in range(batch_size):
-            for j in range(batch_size):
-                expanded[i*batch_size + j] = inputs[i]
-                targets[i*batch_size + j] = torch.max(
-                    coverages[i], coverages[j],
+            for j in range(self._target_size):
+                expanded_inputs[i*self._target_size + j] = inputs[i]
+                expanded_coverages[i*self._target_size + j] = coverages[i]
+                targets[i*self._target_size + j] = torch.max(
+                    coverages[i], coverages[targets_idx[j]],
                 )
 
-        return (expanded, targets)
+        return (expanded_inputs, expanded_coverages, targets)
 
     def batch_train_generator(
             self,
     ):
-        self._fixed_embedding.eval()
         self._coverage_policy.eval()
         self._generator_policy.train()
 
@@ -256,20 +252,18 @@ class Transformer:
         input_loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
-            (inputs, targets) = self.generate_targets(inputs, coverages)
+            (inputs, coverages, targets) = self.generate_targets(
+                inputs, coverages,
+            )
 
-            embeds = self._fixed_embedding(inputs)
-            generated = self._generator_policy(embeds, targets)
-
+            generated = self._generator_policy(inputs, coverages, targets)
             estimated = self._coverage_policy(generated)
 
             target_loss = F.mse_loss(estimated, targets)
-            input_loss = (1.0 - F.cosine_similarity(
-                embeds, generated, 2
-            )).sum() / (embeds.size(0) * embeds.size(1))
+            input_loss = F.mse_loss(inputs, generated)
 
             self._generator_optimizer.zero_grad()
-            (target_loss + 0.01 * input_loss).backward()
+            (target_loss + 0.001 * input_loss).backward()
             self._generator_optimizer.step()
 
             target_loss_meter.update(target_loss.item())
@@ -292,7 +286,7 @@ class Transformer:
             )
             self._tb_writer.add_scalar(
                 "train/loss/generator_input",
-                target_loss_meter.avg, self._generator_batch_count,
+                input_loss_meter.avg, self._generator_batch_count,
             )
 
         self._generator_batch_count += 1
@@ -319,6 +313,46 @@ class Transformer:
     #     })
 
     #     return loss_meter.avg
+
+    def generate(
+            self,
+    ):
+        self._coverage_policy.eval()
+        self._generator_policy.eval()
+
+        population = []
+        for it, (inputs, coverages) in enumerate(self._train_loader):
+            (inputs, coverages, targets) = self.generate_targets(
+                inputs, coverages,
+            )
+            generated = self._generator_policy(inputs, coverages, targets)
+
+            population += torch.argmax(generated, 2).cpu().numpy().tolist()
+
+        coverages, input_bytes, aggregate = self._runner.run(population)
+
+        for j in range(len(population)):
+            new = self._runs_db.store(population[j], coverages[j])
+            if new:
+                Log.out("NEW PATH", {
+                    'bytes': input_bytes[j],
+                })
+
+        if self._tb_writer is not None:
+            self._tb_writer.add_scalar(
+                "generate/aggregate/crash_count",
+                aggregate.crash_count(), self._generate_batch_count,
+            )
+            self._tb_writer.add_scalar(
+                "generate/aggregate/transition_count",
+                aggregate.transition_count(), self._generate_batch_count,
+            )
+            self._tb_writer.add_scalar(
+                "generate/aggregate/path_count",
+                aggregate.path_count(), self._generate_batch_count,
+            )
+
+        self._generate_batch_count += 1
 
 
 def train():
@@ -395,5 +429,6 @@ def train():
 
         transformer.batch_train_coverage()
         transformer.batch_train_generator()
+        transformer.generate()
 
         i += 1

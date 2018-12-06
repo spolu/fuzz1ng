@@ -11,7 +11,8 @@
   "transformer_attention_head_count": 4,
   "transformer_intermediate_size": 512,
 
-  "transformer_batch_size": 8,
+  "transformer_batch_size": 16,
+  "transformer_target_size": 4,
   "transformer_learning_rate": 0.0001,
   "transformer_adam_beta_1": 0.9,
   "transformer_adam_beta_2": 0.999,
