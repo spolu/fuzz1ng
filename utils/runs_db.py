@@ -296,9 +296,20 @@ def eval():
         'runs_db_dir',
         type=str, help="directory of the runs_db",
     )
+    parser.add_argument(
+        '--gym_fuzz1ng_env',
+        type=str, help="config override",
+    )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
+
+    if args.gym_fuzz1ng_env is not None:
+        config.override(
+            'gym_fuzz1ng_env',
+            args.gym_fuzz1ng_env,
+        )
+
     runner = Runner(config)
     RunsDB.from_dump_dir(
         os.path.expanduser(args.runs_db_dir),
