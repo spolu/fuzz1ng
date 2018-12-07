@@ -4,8 +4,6 @@ import os
 import random
 import time
 
-from tensorboardX import SummaryWriter
-
 from utils.config import Config
 from utils.log import Log
 from utils.runner import Runner
@@ -23,9 +21,6 @@ class SimpleFuzzer:
             runner: Runner,
             runs_db: RunsDB,
     ) -> None:
-        if config.get('tensorboard_log_dir') is not None:
-            self.tb_writer = SummaryWriter(config.get('tensorboard_log_dir'))
-
         self.sample_count = config.get('genetic_simple_sample_count')
 
         self._runner = runner

@@ -5,8 +5,6 @@ import random
 import time
 import typing
 
-from tensorboardX import SummaryWriter
-
 from utils.config import Config
 from utils.log import Log
 from utils.runner import Runner
@@ -77,9 +75,6 @@ class EnergyFuzzer:
             runner: Runner,
             runs_db: RunsDB,
     ) -> None:
-        if config.get('tensorboard_log_dir') is not None:
-            self.tb_writer = SummaryWriter(config.get('tensorboard_log_dir'))
-
         self._runner = runner
         self._runs_db = runs_db
 

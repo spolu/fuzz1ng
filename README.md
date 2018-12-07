@@ -3,9 +3,10 @@
 ### Run an experiment
 
 EXPERIMENT=20181207_1222_checksum_8_8
+
 mkdir -p ~/tmp/fuzzing/$EXPERIMENT
 genetic_simple_fuzzer configs/dev.json ~/tmp/fuzzing/$EXPERIMENT/ --genetic_simple_sample_count=16 --gym_fuzz1ng_env=FuzzChecksum_8_8-v0
-transformer_trainer configs/dev.json ~/tmp/fuzzing/$EXPERIMENT --transformer_save_dir=~/tmp/fuzzing/$EXPERIMENT --gym_fuzz1ng_env=FuzzChecksum_8_8-v0 --device=cuda:0 --genetic_simple_sample_count=16 --tensorboard_log_dir=~/tmp/tensorboard/$EXPERIMENT_`now`
+transformer_trainer configs/dev.json ~/tmp/fuzzing/$EXPERIMENT --transformer_save_dir=~/tmp/fuzzing/$EXPERIMENT --gym_fuzz1ng_env=FuzzChecksum_8_8-v0 --device=cuda:0 --genetic_simple_sample_count=16 --tensorboard_log_dir=~/tmp/tensorboard/`echo $EXPERIMENT`_`now`
 
 ### Evaluate a runs_db with afl-cmin
 
