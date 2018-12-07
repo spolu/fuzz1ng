@@ -13,7 +13,7 @@
 
   "transformer_batch_size": 16,
   "transformer_target_size": 4,
-  "transformer_learning_rate": 0.0001,
+  "transformer_learning_rate": 0.001,
   "transformer_adam_beta_1": 0.9,
   "transformer_adam_beta_2": 0.999,
 

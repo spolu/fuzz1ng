@@ -1,9 +1,11 @@
 import argparse
+import numpy as np
 import os
 import random
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import torchvision
 
 from genetic.simple import SimpleFuzzer
 
@@ -168,6 +170,32 @@ class Transformer:
 
             loss_meter.update(loss.item())
 
+            if it == 0:
+                c_images = []
+                g_images = []
+
+                for i in range(coverages.size(0)):
+                    c = coverages[i].cpu()
+                    c = c / c.max() * 255
+                    c_images.append(c.to(torch.uint8).unsqueeze(0))
+
+                    g = generated[i].cpu()
+                    g = g / g.max() * 255
+                    g_images.append(g.to(torch.uint8).unsqueeze(0))
+
+                c_grid = torchvision.utils.make_grid(c_images)
+                self._tb_writer.add_image(
+                    'train/visual/coverage',
+                    np.flip(c_grid.numpy(), axis=0),
+                    self._coverage_batch_count,
+                )
+                g_grid = torchvision.utils.make_grid(g_images)
+                self._tb_writer.add_image(
+                    'train/visual/generated',
+                    np.flip(g_grid.numpy(), axis=0),
+                    self._coverage_batch_count,
+                )
+
         Log.out("COVERAGE TRAIN", {
             'batch_count': self._coverage_batch_count,
             'loss_avg': loss_meter.avg,
@@ -298,29 +326,6 @@ class Transformer:
 
         self._generator_batch_count += 1
 
-    # def batch_test_generator(
-    #         self,
-    # ):
-    #     self._generator_policy.eval()
-    #     loss_meter = Meter()
-
-    #     with torch.no_grad():
-    #         for it, (inputs, coverages) in enumerate(self._test_loader):
-    #             probs = self._generator_policy(coverages)
-    #             generated = self._coverage_policy(inputs)
-    #             loss = F.mse_loss(generated, coverages)
-
-    #             loss_meter.update(loss.item())
-
-    #     Log.out("COVERAGE TEST", {
-    #         'batch_count': self._coverage_batch_count,
-    #         'loss_avg': loss_meter.avg,
-    #         'loss_min': loss_meter.min,
-    #         'loss_max': loss_meter.max,
-    #     })
-
-    #     return loss_meter.avg
-
     def generate(
             self,
     ):
@@ -338,12 +343,14 @@ class Transformer:
 
         coverages, input_bytes, aggregate = self._runner.run(population)
 
+        new_path = False
         for j in range(len(population)):
             new = self._runs_db.test(coverages[j])
             if new:
                 Log.out("NEW PATH", {
                     'bytes': input_bytes[j],
                 })
+                new_path = True
                 self._runs_db.store(population[j], coverages[j])
 
         if self._tb_writer is not None:
@@ -361,6 +368,7 @@ class Transformer:
             )
 
         self._generate_batch_count += 1
+        return new_path
 
 
 def train():
@@ -441,18 +449,19 @@ def train():
 
     i = 0
     while True:
-        if i % 5 == 0:
-            # transformer.batch_test_coverage()
-            for _ in range(20):
-                fuzzer.cycle()
-            runs_db.dump()
-            transformer.reload_datasets()
-
         if i % 2 == 0:
             transformer.save_models()
 
         transformer.batch_train_coverage()
         transformer.batch_train_generator()
-        transformer.generate()
+
+        new_path = transformer.generate()
+
+        if new_path:
+            # transformer.batch_test_coverage()
+            for _ in range(20):
+                fuzzer.cycle()
+            runs_db.dump()
+            transformer.reload_datasets()
 
         i += 1
