@@ -320,10 +320,10 @@ class Generator(nn.Module):
                 self.intermediate_size,
             ),
             nn.Linear(self.hidden_size, dict_size),
-            nn.Softmax(-1),
         ]
 
         self.layers = nn.Sequential(*layers)
+        self.softmax = nn.Softmax(-1),
 
     def forward(self, inputs, coverages, targets):
         hiddens = torch.cat([
@@ -331,7 +331,7 @@ class Generator(nn.Module):
             self.coverage(coverages),
             self.coverage(targets),
         ], 1)
-        outputs = self.layers(hiddens)
+        outputs = self.softmax(inputs + self.layers(hiddens))
         return outputs
 
 

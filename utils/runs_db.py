@@ -66,6 +66,21 @@ class RunsDB:
         self._pools = {}
         self._run_count = 0
 
+    def test(
+            self,
+            coverage: Coverage,
+    ) -> bool:
+        if coverage.crash_count() == 1:
+            return False
+
+        assert len(coverage.path_list()) == 1
+
+        path = coverage.path_list()[0]
+        if path not in self._pools:
+            return True
+
+        return False
+
     def store(
             self,
             input: typing.List[int],

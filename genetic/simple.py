@@ -121,7 +121,6 @@ def fuzz():
         )
 
     runner = Runner(config)
-    # runs_db = RunsDB(config, os.path.expanduser(args.runs_db_dir))
     runs_db = RunsDB.from_dump_dir(
         os.path.expanduser(args.runs_db_dir),
         config, runner,
@@ -129,5 +128,11 @@ def fuzz():
 
     fuzzer = SimpleFuzzer(config, runner, runs_db)
 
+    i = 0
     while True:
+        if i % 20 == 0:
+            runs_db.dump()
+
         fuzzer.cycle()
+
+        i += 1

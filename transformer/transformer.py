@@ -5,6 +5,8 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
+from genetic.simple import SimpleFuzzer
+
 from tensorboardX import SummaryWriter
 
 from transformer.model import Coverage, Generator
@@ -267,7 +269,8 @@ class Transformer:
             input_loss = F.mse_loss(inputs, generated)
 
             self._generator_optimizer.zero_grad()
-            (target_loss + 0.001 * input_loss).backward()
+            # (target_loss + 0.005 * input_loss).backward()
+            target_loss.backward()
             self._generator_optimizer.step()
 
             target_loss_meter.update(target_loss.item())
@@ -336,11 +339,12 @@ class Transformer:
         coverages, input_bytes, aggregate = self._runner.run(population)
 
         for j in range(len(population)):
-            new = self._runs_db.store(population[j], coverages[j])
+            new = self._runs_db.test(coverages[j])
             if new:
                 Log.out("NEW PATH", {
                     'bytes': input_bytes[j],
                 })
+                self._runs_db.store(population[j], coverages[j])
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
@@ -390,6 +394,10 @@ def train():
         '--gym_fuzz1ng_env',
         type=str, help="config override",
     )
+    parser.add_argument(
+        '--genetic_simple_sample_count',
+        type=int, help="config override",
+    )
     args = parser.parse_args()
 
     config = Config.from_file(args.config_path)
@@ -416,6 +424,11 @@ def train():
             'gym_fuzz1ng_env',
             args.gym_fuzz1ng_env,
         )
+    if args.genetic_simple_sample_count is not None:
+        config.override(
+            'genetic_simple_sample_count',
+            args.genetic_simple_sample_count,
+        )
 
     runner = Runner(config)
     runs_db = RunsDB.from_dump_dir(
@@ -424,11 +437,14 @@ def train():
     )
 
     transformer = Transformer(config, runner, runs_db)
+    fuzzer = SimpleFuzzer(config, runner, runs_db)
 
     i = 0
     while True:
-        if i % 10 == 0:
+        if i % 5 == 0:
             # transformer.batch_test_coverage()
+            for _ in range(20):
+                fuzzer.cycle()
             runs_db.dump()
             transformer.reload_datasets()
 
