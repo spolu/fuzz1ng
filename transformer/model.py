@@ -323,7 +323,7 @@ class Generator(nn.Module):
         ]
 
         self.layers = nn.Sequential(*layers)
-        self.softmax = nn.Softmax(-1),
+        self.softmax = nn.Softmax(-1)
 
     def forward(self, inputs, coverages, targets):
         hiddens = torch.cat([
