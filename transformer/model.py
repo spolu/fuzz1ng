@@ -2,8 +2,6 @@ import math
 import torch
 import torch.nn as nn
 
-from torch.nn.parameter import Parameter
-
 
 def gelu(
         x,
@@ -82,16 +80,10 @@ class SelfAttention(nn.Module):
         key = self.transpose_for_scores(mixed_key)
         value = self.transpose_for_scores(mixed_value)
 
-        # Take the dot product between "query" and "key" to get the raw
-        # attention scores.
         attention_scores = torch.matmul(query, key.transpose(-1, -2)) / \
             math.sqrt(self.attention_head_size)
 
-        # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
         context = torch.matmul(attention_probs, value)
@@ -171,8 +163,6 @@ class Transformer(nn.Module):
             self,
             module,
     ):
-        """ Initialize the weights.
-        """
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=0.02)
         elif isinstance(module, LayerNorm):
@@ -194,42 +184,122 @@ class Transformer(nn.Module):
         return block_output
 
 
-class Transducer(nn.Module):
-    def __init__(
-            self,
-            input_seq_len,
-            output_seq_len,
-    ):
-        super(Transducer, self).__init__()
-        self.input_seq_len = input_seq_len
-        self.ouput_seq_len = output_seq_len
-        self.weight = Parameter(torch.Tensor(output_seq_len, input_seq_len))
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-
-    def forward(self, input_tensor):
-        return torch.matmul(self.weight, input_tensor)
-
-
-class FixedEmbedding(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(
             self,
             config,
-            dict_size,
     ):
-        super(FixedEmbedding, self).__init__()
+        super(AutoEncoder, self).__init__()
 
-        self.embedding_size = config.get('transformer_embedding_size')
-        self.embedding = nn.Embedding(dict_size, self.embedding_size)
+        self.latent_size = config.get('transformer_latent_size')
 
-    def forward(self, inputs):
-        pres = self.embedding(inputs)
-        embeds = pres / torch.sum(pres, -1, keepdim=True)
-        return embeds
+        encoder_layers = [
+            nn.Conv2d(1, 16, 5, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(16),
+            nn.ReLU(True),
+            nn.Conv2d(16, 32, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(True),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.Conv2d(128, 256, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+        ]
+        self.encoder = nn.Sequential(*encoder_layers)
+        self.mean = nn.Linear(256*8*8, self.latent_size)
+        self.logvar = nn.Linear(256*8*8, self.latent_size)
+
+        decoder_layers = [
+            nn.Linear(self.latent_size, 256*8*8),
+            nn.ConvTranspose2d(256, 128, 5, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(16),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(16, 1, 5, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(1),
+            nn.Sigmoid(),
+        ]
+        self.decoder = nn.Sequential(*decoder_layers)
+        self.latent = nn.Linear(self.latent_size, 256*8*8)
+
+        self.apply(self.init_weights)
+
+    def init_weights(
+            self,
+            module,
+    ):
+        if isinstance(module, nn.Conv2d):
+            module.weight.data.normal_(0, 0.02)
+            if module.bias is not None:
+                module.bias.data.fill_(0)
+        if isinstance(module, nn.ConvTranspose2d):
+            module.weight.data.normal_(0, 0.02)
+            if module.bias is not None:
+                module.bias.data.fill_(0)
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(
+                module.weight.data, nn.init.calculate_gain('linear'),
+            )
+            if module.bias is not None:
+                module.bias.data.fill_(0)
+
+    def encode(
+            self,
+            inputs,
+    ):
+        x = self.encoder(inputs)
+        z = x.view(-1, 256 * 8 * 8)
+
+        return self.mean(z), self.var(z)
+
+    def decode(
+            self,
+            z,
+    ):
+        z = self.latent(z)
+        x = z.view(-1, 256, 8, 8)
+
+        return self.decoder(x)
+
+    def reparameterize(
+            self,
+            mean,
+            logvar,
+    ):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps * std + mean
+
+    def forward(
+            self,
+            coverage,
+            encode=False,
+            deterministic=False,
+    ):
+        mean, logvar = self.encode(coverage)
+
+        z = self.reparameterize(mean, logvar)
+        if deterministic:
+            z = mean
+
+        if encode:
+            return z
+        else:
+            reconstruct = self.decode(z)
+            return reconstruct, mean, logvar
 
 
 class Coverage(nn.Module):
@@ -241,63 +311,24 @@ class Coverage(nn.Module):
     ):
         super(Coverage, self).__init__()
 
-        self.hidden_size = config.get('transformer_hidden_size')
-        self.intermediate_size = config.get('transformer_intermediate_size')
-        self.attention_head_count = \
-            config.get('transformer_attention_head_count')
+        self.device = torch.device(config.get('device'))
 
-        layers = [
-            nn.Linear(dict_size, self.hidden_size),
-            Transformer(
-                self.hidden_size,
-                self.attention_head_count,
-                self.intermediate_size,
-            ),
-            Transformer(
-                self.hidden_size,
-                self.attention_head_count,
-                self.intermediate_size,
-            ),
-            Transducer(input_size, 256),
-            Transformer(
-                self.hidden_size,
-                self.attention_head_count,
-                self.intermediate_size,
-            ),
-            Transformer(
-                self.hidden_size,
-                self.attention_head_count,
-                self.intermediate_size,
-            ),
-            nn.Linear(self.hidden_size, 256),
-        ]
-
-        self.layers = nn.Sequential(*layers)
-
-    def forward(self, embeds):
-        coverages = self.layers(embeds)
-        return coverages
-
-
-class Generator(nn.Module):
-    def __init__(
-            self,
-            config,
-            dict_size,
-            input_size,
-    ):
-        super(Generator, self).__init__()
-
+        self.latent_size = config.get('transformer_latent_size')
         self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
         self.intermediate_size = config.get('transformer_intermediate_size')
         self.attention_head_count = \
             config.get('transformer_attention_head_count')
 
-        self.input = nn.Linear(dict_size, self.hidden_size)
-        self.coverage = nn.Linear(256, self.hidden_size)
+        self.input_embedding = nn.Embedding(
+            dict_size, self.embedding_size,
+        )
+        self.position_embedding = nn.Embedding(
+            input_size + 256, self.embedding_size
+        )
 
         layers = [
+            nn.Linear(self.embedding_size, self.hidden_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -308,7 +339,6 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            Transducer(input_size + 2 * 256, input_size),
             Transformer(
                 self.hidden_size,
                 self.attention_head_count,
@@ -319,25 +349,25 @@ class Generator(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            nn.Linear(self.hidden_size, dict_size),
+            nn.Linear(self.hidden_size, self.latent_size),
         ]
 
         self.layers = nn.Sequential(*layers)
-        self.softmax = nn.Softmax(-1)
 
-    def forward(self, inputs, coverages, targets):
-        hiddens = torch.cat([
-            self.input(inputs),
-            self.coverage(coverages),
-            self.coverage(targets),
-        ], 1)
-        outputs = self.softmax(inputs + self.layers(hiddens))
-        return outputs
+    def forward(
+            self,
+            inputs,
+    ):
+        positions = torch.zeroes(
+            inputs.size(0),
+            inputs.size(1) + 256,
+            dtype=torch.int64,
+        )
+        # TODO(stan): build position embeddings.
+        # TODO(stan): make learnable embeddings.
+        embeds = \
+            self.input_embedding(inputs) + self.position_embedding(positions)
 
+        latents = self.layers(embeds).sum(1)
 
-if __name__ == "__main__":
-    transformer = Transformer(256, 8, 512)
-    transducer = Transducer(13, 7)
-
-    out = transformer(torch.ones(4, 13, 256))
-    fin = transducer(out)
+        return latents

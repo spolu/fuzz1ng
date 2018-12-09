@@ -6,6 +6,7 @@
   "database_pool_size": 128,
   "database_pool_test_size": 16,
 
+  "transformer_latent_size": 256,
   "transformer_embedding_size": 4,
   "transformer_hidden_size": 256,
   "transformer_attention_head_count": 4,

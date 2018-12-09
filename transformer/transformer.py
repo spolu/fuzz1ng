@@ -1,13 +1,12 @@
 import argparse
 import numpy as np
 import os
-import random
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision
 
-from genetic.simple import SimpleFuzzer
+# from genetic.simple import SimpleFuzzer
 
 from tensorboardX import SummaryWriter
 
@@ -58,13 +57,11 @@ class Transformer:
             ),
         )
 
-        self._generator_policy = Generator(
+        self._autoencoder_policy = Generator(
             self._config,
-            self._runner.dict_size(),
-            self._runner.input_size(),
         ).to(self._device)
-        self._generator_optimizer = optim.Adam(
-            self._generator_policy.parameters(),
+        self._autoencoder_optimizer = optim.Adam(
+            self._autoencoder_policy.parameters(),
             lr=self._config.get('transformer_learning_rate'),
             betas=(
                 self._config.get('transformer_adam_beta_1'),
@@ -85,21 +82,21 @@ class Transformer:
                     map_location=self._device,
                 ),
             )
-            self._generator_policy.load_state_dict(
+            self._autoencoder_policy.load_state_dict(
                 torch.load(
-                    self._load_dir + "/generator_policy.pt",
+                    self._load_dir + "/autoencoder_policy.pt",
                     map_location=self._device,
                 ),
             )
-            self._generator_optimizer.load_state_dict(
+            self._autoencoder_optimizer.load_state_dict(
                 torch.load(
-                    self._load_dir + "/generator_optimizer.pt",
+                    self._load_dir + "/autoencoder_optimizer.pt",
                     map_location=self._device,
                 ),
             )
 
         self._coverage_batch_count = 0
-        self._generator_batch_count = 0
+        self._autoencoder_batch_count = 0
         self._generate_batch_count = 0
 
         self.reload_datasets()
@@ -148,12 +145,12 @@ class Transformer:
                 self._save_dir + "/coverage_optimizer.pt",
             )
             torch.save(
-                self._generator_policy.state_dict(),
-                self._save_dir + "/generator_policy.pt",
+                self._autoencoder_policy.state_dict(),
+                self._save_dir + "/autoencoder_policy.pt",
             )
             torch.save(
-                self._generator_optimizer.state_dict(),
-                self._save_dir + "/generator_optimizer.pt",
+                self._autoencoder_optimizer.state_dict(),
+                self._save_dir + "/autoencoder_optimizer.pt",
             )
 
     def batch_train_coverage(self):
@@ -233,142 +230,39 @@ class Transformer:
 
         return loss_meter.avg
 
-    def generate_targets(
-            self,
-            inputs,
-            coverages,
-    ):
-        """ As a stopgab solution for now we're taking the pairwise max.
-        """
-        assert inputs.size(0) == coverages.size(0)
-        batch_size = inputs.size(0)
-
-        expanded_inputs = torch.zeros(
-            batch_size * self._target_size,
-            inputs.size(1),
-            inputs.size(2),
-        ).to(self._device)
-
-        expanded_coverages = torch.zeros(
-            batch_size * self._target_size,
-            coverages.size(1),
-            coverages.size(2),
-        ).to(self._device)
-
-        targets = torch.zeros(
-            batch_size * self._target_size,
-            coverages.size(1),
-            coverages.size(2),
-        ).to(self._device)
-
-        targets_idx = [
-            random.randint(0, batch_size-1)
-            for _ in range(self._target_size)
-        ]
-
-        for i in range(batch_size):
-            for j in range(self._target_size):
-                expanded_inputs[i*self._target_size + j] = inputs[i]
-                expanded_coverages[i*self._target_size + j] = coverages[i]
-                targets[i*self._target_size + j] = torch.max(
-                    coverages[i], coverages[targets_idx[j]],
-                )
-
-        return (expanded_inputs, expanded_coverages, targets)
-
-    def batch_train_generator(
+    def batch_train_autoencoder(
             self,
     ):
-        self._coverage_policy.eval()
-        self._generator_policy.train()
+        self._autoencoder_policy.train()
 
-        target_loss_meter = Meter()
-        input_loss_meter = Meter()
+        loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
-            (inputs, coverages, targets) = self.generate_targets(
-                inputs, coverages,
-            )
 
-            generated = self._generator_policy(inputs, coverages, targets)
-            estimated = self._coverage_policy(generated)
+            (reconstructs, means, logvars) = self._autoencoder_policy(inputs)
 
-            target_loss = F.mse_loss(estimated, targets)
-            input_loss = F.mse_loss(inputs, generated)
+            loss = F.binary_cross_entropy(reconstructs, coverages)
 
-            self._generator_optimizer.zero_grad()
-            # (target_loss + 0.005 * input_loss).backward()
-            target_loss.backward()
-            self._generator_optimizer.step()
+            self._autoencoder_optimizer.zero_grad()
+            loss.backward()
+            self._autoencoder_optimizer.step()
 
-            target_loss_meter.update(target_loss.item())
-            input_loss_meter.update(input_loss.item())
+            loss_meter.update(loss.item())
 
-        Log.out("GENERATOR TRAIN", {
-            'batch_count': self._generator_batch_count,
-            'target_loss_avg': target_loss_meter.avg,
-            # 'target_loss_min': target_loss_meter.min,
-            # 'target_loss_max': target_loss_meter.max,
-            'input_loss_avg': input_loss_meter.avg,
-            # 'input_loss_min': input_loss_meter.min,
-            # 'input_loss_max': input_loss_meter.max,
+        Log.out("AUTOENCODER TRAIN", {
+            'batch_count': self._autoencoder_batch_count,
+            'loss_avg': loss_meter.avg,
+            # 'loss_min': loss_meter.min,
+            # 'loss_max': loss_meter.max,
         })
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
-                "train/loss/generator_target",
-                target_loss_meter.avg, self._generator_batch_count,
-            )
-            self._tb_writer.add_scalar(
-                "train/loss/generator_input",
-                input_loss_meter.avg, self._generator_batch_count,
+                "train/loss/autoencoder",
+                loss_meter.avg, self._generator_batch_count,
             )
 
-        self._generator_batch_count += 1
-
-    def generate(
-            self,
-    ):
-        self._coverage_policy.eval()
-        self._generator_policy.eval()
-
-        population = []
-        for it, (inputs, coverages) in enumerate(self._train_loader):
-            (inputs, coverages, targets) = self.generate_targets(
-                inputs, coverages,
-            )
-            generated = self._generator_policy(inputs, coverages, targets)
-
-            population += torch.argmax(generated, 2).cpu().numpy().tolist()
-
-        coverages, input_bytes, aggregate = self._runner.run(population)
-
-        new_path = False
-        for j in range(len(population)):
-            new = self._runs_db.test(coverages[j])
-            if new:
-                Log.out("NEW PATH", {
-                    'bytes': input_bytes[j],
-                })
-                new_path = True
-                self._runs_db.store(population[j], coverages[j])
-
-        if self._tb_writer is not None:
-            self._tb_writer.add_scalar(
-                "generate/aggregate/crash_count",
-                aggregate.crash_count(), self._generate_batch_count,
-            )
-            self._tb_writer.add_scalar(
-                "generate/aggregate/transition_count",
-                aggregate.transition_count(), self._generate_batch_count,
-            )
-            self._tb_writer.add_scalar(
-                "generate/aggregate/path_count",
-                aggregate.path_count(), self._generate_batch_count,
-            )
-
-        self._generate_batch_count += 1
-        return new_path
+        self._autoencoder_batch_count += 1
 
 
 def train():
@@ -445,7 +339,7 @@ def train():
     )
 
     transformer = Transformer(config, runner, runs_db)
-    fuzzer = SimpleFuzzer(config, runner, runs_db)
+    # fuzzer = SimpleFuzzer(config, runner, runs_db)
 
     i = 0
     while True:
@@ -453,15 +347,6 @@ def train():
             transformer.save_models()
 
         transformer.batch_train_coverage()
-        transformer.batch_train_generator()
-
-        new_path = transformer.generate()
-
-        if new_path:
-            # transformer.batch_test_coverage()
-            for _ in range(20):
-                fuzzer.cycle()
-            runs_db.dump()
-            transformer.reload_datasets()
+        transformer.batch_train_autoencoder()
 
         i += 1

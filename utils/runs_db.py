@@ -291,13 +291,12 @@ class RunsDBDataset(Dataset):
 
         assert run is not None
 
-        data = torch.zeros(self._input_size, self._dict_size)
-        for i in range(len(run['input'])):
-            data[i][run['input'][i]] = 1.0
+        # data = torch.zeros(self._input_size, self._dict_size)
+        # for i in range(len(run['input'])):
+        #     data[i][run['input'][i]] = 1.0
 
         return (
-            # torch.LongTensor(run['input']).to(self._device),
-            data.to(self._device),
+            torch.LongTensor(run['input']).to(self._device),
             torch.FloatTensor(run['coverage'].observation()).to(self._device),
         )
 
