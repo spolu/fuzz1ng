@@ -10,7 +10,7 @@ import torchvision
 
 from tensorboardX import SummaryWriter
 
-from transformer.model import Coverage, Generator
+from transformer.model import Coverage, AutoEncoder
 
 from utils.config import Config
 from utils.meter import Meter
@@ -57,7 +57,7 @@ class Transformer:
             ),
         )
 
-        self._autoencoder_policy = Generator(
+        self._autoencoder_policy = AutoEncoder(
             self._config,
         ).to(self._device)
         self._autoencoder_optimizer = optim.Adam(
@@ -154,12 +154,17 @@ class Transformer:
             )
 
     def batch_train_coverage(self):
+        self._autoencoder_policy.eval()
         self._coverage_policy.train()
         loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
             generated = self._coverage_policy(inputs)
-            loss = F.mse_loss(generated, coverages)
+            latents = self._autoencoder_policy(
+                coverages, encode=True, deterministic=True,
+            )
+
+            loss = F.mse_loss(generated, latents)
 
             self._coverage_optimizer.zero_grad()
             loss.backward()
@@ -167,9 +172,17 @@ class Transformer:
 
             loss_meter.update(loss.item())
 
-            if it == 0:
+            if it == 0 and self._tb_writer is not None:
                 c_images = []
                 g_images = []
+                r_images = []
+
+                reconstructs, _, _ = self._autoencoder_policy(
+                    coverages, deterministic=True,
+                )
+                generated = self._autoencoder_policy.decode(
+                    generated,
+                )
 
                 for i in range(coverages.size(0)):
                     c = coverages[i].cpu()
@@ -178,7 +191,11 @@ class Transformer:
 
                     g = generated[i].cpu()
                     g = g / g.max() * 255
-                    g_images.append(g.to(torch.uint8).unsqueeze(0))
+                    g_images.append(g.to(torch.uint8))
+
+                    r = reconstructs[i].cpu()
+                    r = r / r.max() * 255
+                    r_images.append(r.to(torch.uint8).unsqueeze(0))
 
                 c_grid = torchvision.utils.make_grid(c_images)
                 self._tb_writer.add_image(
@@ -190,6 +207,12 @@ class Transformer:
                 self._tb_writer.add_image(
                     'train/visual/generated',
                     np.flip(g_grid.numpy(), axis=0),
+                    self._coverage_batch_count,
+                )
+                r_grid = torchvision.utils.make_grid(r_images)
+                self._tb_writer.add_image(
+                    'train/visual/reconstructs',
+                    np.flip(r_grid.numpy(), axis=0),
                     self._coverage_batch_count,
                 )
 
@@ -211,13 +234,18 @@ class Transformer:
     def batch_test_coverage(
             self,
     ):
+        self._autoencoder_policy.eval()
         self._coverage_policy.eval()
         loss_meter = Meter()
 
         with torch.no_grad():
             for it, (inputs, coverages) in enumerate(self._test_loader):
                 generated = self._coverage_policy(inputs)
-                loss = F.mse_loss(generated, coverages)
+                latents = self._autoencoder_policy(
+                    coverages, encode=True, deterministic=True,
+                )
+
+                loss = F.mse_loss(generated, latents)
 
                 loss_meter.update(loss.item())
 
@@ -228,6 +256,12 @@ class Transformer:
             # 'loss_max': loss_meter.max,
         })
 
+        if self._tb_writer is not None:
+            self._tb_writer.add_scalar(
+                "test/loss/coverage",
+                loss_meter.avg, self._coverage_batch_count,
+            )
+
         return loss_meter.avg
 
     def batch_train_autoencoder(
@@ -235,31 +269,41 @@ class Transformer:
     ):
         self._autoencoder_policy.train()
 
-        loss_meter = Meter()
+        bce_loss_meter = Meter()
+        kld_loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
 
-            (reconstructs, means, logvars) = self._autoencoder_policy(inputs)
+            reconstructs, means, logvars = self._autoencoder_policy(coverages)
 
-            loss = F.binary_cross_entropy(reconstructs, coverages)
+            bce_loss = F.binary_cross_entropy(reconstructs, coverages)
+            kld_loss = -0.5 * torch.sum(
+                1 + logvars - means.pow(2) - logvars.exp()
+            ) / inputs.size(0)
 
             self._autoencoder_optimizer.zero_grad()
-            loss.backward()
+            (bce_loss + kld_loss).backward()
             self._autoencoder_optimizer.step()
 
-            loss_meter.update(loss.item())
+            bce_loss_meter.update(bce_loss.item())
+            kld_loss_meter.update(kld_loss.item())
 
         Log.out("AUTOENCODER TRAIN", {
             'batch_count': self._autoencoder_batch_count,
-            'loss_avg': loss_meter.avg,
+            'bce_loss_avg': bce_loss_meter.avg,
+            'kld_loss_avg': kld_loss_meter.avg,
             # 'loss_min': loss_meter.min,
             # 'loss_max': loss_meter.max,
         })
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
-                "train/loss/autoencoder",
-                loss_meter.avg, self._generator_batch_count,
+                "train/loss/autoencoder/bce",
+                bce_loss_meter.avg, self._autoencoder_batch_count,
+            )
+            self._tb_writer.add_scalar(
+                "train/loss/autoencoder/kld",
+                kld_loss_meter.avg, self._autoencoder_batch_count,
             )
 
         self._autoencoder_batch_count += 1
@@ -275,6 +319,10 @@ def train():
     parser.add_argument(
         'runs_db_dir',
         type=str, help="directory to the runs_db",
+    )
+    parser.add_argument(
+        'phase',
+        type=str, help="fuzzer, autoencoder, coverage",
     )
     parser.add_argument(
         '--device',
@@ -343,10 +391,15 @@ def train():
 
     i = 0
     while True:
-        if i % 2 == 0:
-            transformer.save_models()
+        if args.phase == 'autoencoder':
+            if i % 10 == 0:
+                transformer.save_models()
+            transformer.batch_train_autoencoder()
 
-        transformer.batch_train_coverage()
-        transformer.batch_train_autoencoder()
+        if args.phase == 'coverage':
+            if i % 10 == 0:
+                # transformer.batch_test_coverage()
+                transformer.save_models()
+            transformer.batch_train_coverage()
 
         i += 1

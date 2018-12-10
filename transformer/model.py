@@ -194,7 +194,10 @@ class AutoEncoder(nn.Module):
         self.latent_size = config.get('transformer_latent_size')
 
         encoder_layers = [
-            nn.Conv2d(1, 16, 5, stride=1, padding=0, bias=False),
+            nn.Conv2d(1, 8, 5, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(8),
+            nn.ReLU(True),
+            nn.Conv2d(8, 16, 3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(16),
             nn.ReLU(True),
             nn.Conv2d(16, 32, 3, stride=2, padding=1, bias=False),
@@ -215,20 +218,33 @@ class AutoEncoder(nn.Module):
         self.logvar = nn.Linear(256*8*8, self.latent_size)
 
         decoder_layers = [
-            nn.Linear(self.latent_size, 256*8*8),
-            nn.ConvTranspose2d(256, 128, 5, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(
+                256, 128, 3, stride=2, padding=1, output_padding=1, bias=False
+            ),
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(
+                128, 64, 3, stride=2, padding=1, output_padding=1, bias=False
+            ),
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(
+                64, 32, 3, stride=2, padding=1, output_padding=1, bias=False
+            ),
             nn.BatchNorm2d(32),
             nn.ReLU(True),
-            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(
+                32, 16, 3, stride=2, padding=1, output_padding=1, bias=False
+            ),
             nn.BatchNorm2d(16),
             nn.ReLU(True),
-            nn.ConvTranspose2d(16, 1, 5, stride=1, padding=0, bias=False),
+            nn.ConvTranspose2d(
+                16, 8, 3, stride=2, padding=0, output_padding=1, bias=False
+            ),
+            nn.BatchNorm2d(8),
+            nn.ReLU(True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(8, 1, 5, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(1),
             nn.Sigmoid(),
         ]
@@ -258,12 +274,12 @@ class AutoEncoder(nn.Module):
 
     def encode(
             self,
-            inputs,
+            coverages,
     ):
-        x = self.encoder(inputs)
+        x = self.encoder(coverages)
         z = x.view(-1, 256 * 8 * 8)
 
-        return self.mean(z), self.var(z)
+        return self.mean(z), self.logvar(z)
 
     def decode(
             self,
@@ -289,7 +305,7 @@ class AutoEncoder(nn.Module):
             encode=False,
             deterministic=False,
     ):
-        mean, logvar = self.encode(coverage)
+        mean, logvar = self.encode(coverage.unsqueeze(1))
 
         z = self.reparameterize(mean, logvar)
         if deterministic:
@@ -298,7 +314,7 @@ class AutoEncoder(nn.Module):
         if encode:
             return z
         else:
-            reconstruct = self.decode(z)
+            reconstruct = self.decode(z).squeeze(1)
             return reconstruct, mean, logvar
 
 
@@ -324,7 +340,7 @@ class Coverage(nn.Module):
             dict_size, self.embedding_size,
         )
         self.position_embedding = nn.Embedding(
-            input_size + 256, self.embedding_size
+            input_size, self.embedding_size
         )
 
         layers = [
@@ -358,13 +374,11 @@ class Coverage(nn.Module):
             self,
             inputs,
     ):
-        positions = torch.zeroes(
-            inputs.size(0),
-            inputs.size(1) + 256,
-            dtype=torch.int64,
-        )
-        # TODO(stan): build position embeddings.
-        # TODO(stan): make learnable embeddings.
+        positions = torch.arange(
+            inputs.size(1), dtype=torch.long
+        ).to(self.device)
+        positions = positions.unsqueeze(0).expand_as(inputs)
+
         embeds = \
             self.input_embedding(inputs) + self.position_embedding(positions)
 
