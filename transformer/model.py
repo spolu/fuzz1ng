@@ -184,38 +184,14 @@ class Transformer(nn.Module):
         return block_output
 
 
-class AutoEncoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(
             self,
             config,
     ):
-        super(AutoEncoder, self).__init__()
+        super(Decoder, self).__init__()
 
         self.latent_size = config.get('transformer_latent_size')
-
-        encoder_layers = [
-            nn.Conv2d(1, 8, 5, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(8),
-            nn.ReLU(True),
-            nn.Conv2d(8, 16, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(True),
-            nn.Conv2d(16, 32, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(True),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(True),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.ReLU(True),
-            nn.Conv2d(128, 256, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.ReLU(True),
-        ]
-        self.encoder = nn.Sequential(*encoder_layers)
-        self.mean = nn.Linear(256*8*8, self.latent_size)
-        self.logvar = nn.Linear(256*8*8, self.latent_size)
 
         decoder_layers = [
             nn.ConvTranspose2d(
@@ -272,50 +248,14 @@ class AutoEncoder(nn.Module):
             if module.bias is not None:
                 module.bias.data.fill_(0)
 
-    def encode(
+    def forward(
             self,
-            coverages,
+            latents,
     ):
-        x = self.encoder(coverages)
-        z = x.view(-1, 256 * 8 * 8)
-
-        return self.mean(z), self.logvar(z)
-
-    def decode(
-            self,
-            z,
-    ):
-        z = self.latent(z)
+        z = self.latent(latents)
         x = z.view(-1, 256, 8, 8)
 
         return self.decoder(x)
-
-    def reparameterize(
-            self,
-            mean,
-            logvar,
-    ):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return eps * std + mean
-
-    def forward(
-            self,
-            coverage,
-            encode=False,
-            deterministic=False,
-    ):
-        mean, logvar = self.encode(coverage.unsqueeze(1))
-
-        z = self.reparameterize(mean, logvar)
-        if deterministic:
-            z = mean
-
-        if encode:
-            return z
-        else:
-            reconstruct = self.decode(z).squeeze(1)
-            return reconstruct, mean, logvar
 
 
 class Coverage(nn.Module):
@@ -369,6 +309,7 @@ class Coverage(nn.Module):
         ]
 
         self.layers = nn.Sequential(*layers)
+        self.decoder = Decoder(config)
 
     def forward(
             self,
@@ -384,4 +325,6 @@ class Coverage(nn.Module):
 
         latents = self.layers(embeds).sum(1)
 
-        return latents
+        generated = self.decoder(latents).squeeze(1)
+
+        return generated
