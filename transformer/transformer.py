@@ -201,7 +201,7 @@ class Transformer:
                 coverages = self.postprocess_coverages(coverages)
                 generated = self._coverage_policy(inputs).squeeze(2)
 
-                loss = F.mse_loss(generated, latents)
+                loss = F.mse_loss(generated, coverages)
 
                 loss_meter.update(loss.item())
 
@@ -305,7 +305,7 @@ def train():
     while True:
         if args.phase == 'coverage':
             if i % 10 == 0:
-                # transformer.batch_test_coverage()
+                transformer.batch_test_coverage()
                 transformer.save_models()
             transformer.batch_train_coverage()
 
