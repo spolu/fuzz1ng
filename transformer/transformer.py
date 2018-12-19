@@ -121,12 +121,25 @@ class Transformer:
                 self._save_dir + "/coverage_optimizer.pt",
             )
 
+    def postprocess_coverages(
+            self,
+            coverages,
+    ):
+        coverages = coverages.sum(2)
+        coverages = torch.where(
+            coverages > 0,
+            torch.ones(coverages.size()).to(self._device),
+            torch.zeros(coverages.size()).to(self._device),
+        )
+        return coverages
+
     def batch_train_coverage(self):
         self._coverage_policy.train()
         loss_meter = Meter()
 
         for it, (inputs, coverages) in enumerate(self._train_loader):
-            generated = self._coverage_policy(inputs)
+            coverages = self.postprocess_coverages(coverages)
+            generated = self._coverage_policy(inputs).squeeze(2)
 
             loss = F.mse_loss(generated, coverages)
 
@@ -180,16 +193,13 @@ class Transformer:
     def batch_test_coverage(
             self,
     ):
-        self._autoencoder_policy.eval()
         self._coverage_policy.eval()
         loss_meter = Meter()
 
         with torch.no_grad():
             for it, (inputs, coverages) in enumerate(self._test_loader):
-                generated = self._coverage_policy(inputs)
-                latents = self._autoencoder_policy(
-                    coverages, encode=True, deterministic=True,
-                )
+                coverages = self.postprocess_coverages(coverages)
+                generated = self._coverage_policy(inputs).squeeze(2)
 
                 loss = F.mse_loss(generated, latents)
 

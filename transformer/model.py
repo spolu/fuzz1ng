@@ -183,79 +183,50 @@ class Transformer(nn.Module):
 
         return block_output
 
-
-class Decoder(nn.Module):
+class Upsample(nn.Module):
     def __init__(
             self,
             config,
     ):
-        super(Decoder, self).__init__()
+        super(Upsample, self).__init__()
 
-        self.latent_size = config.get('transformer_latent_size')
+        self.hidden_size = config.get('transformer_hidden_size')
 
-        decoder_layers = [
-            nn.ConvTranspose2d(
-                256, 128, 3, stride=2, padding=1, output_padding=1, bias=False
-            ),
-            nn.BatchNorm2d(128),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(
-                128, 64, 3, stride=2, padding=1, output_padding=1, bias=False
-            ),
-            nn.BatchNorm2d(64),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(
-                64, 32, 3, stride=2, padding=1, output_padding=1, bias=False
-            ),
-            nn.BatchNorm2d(32),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(
-                32, 16, 3, stride=2, padding=1, output_padding=1, bias=False
-            ),
-            nn.BatchNorm2d(16),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(
-                16, 8, 3, stride=2, padding=0, output_padding=1, bias=False
-            ),
-            nn.BatchNorm2d(8),
-            nn.ReLU(True),
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(8, 1, 5, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(1),
-            nn.Sigmoid(),
-        ]
-        self.decoder = nn.Sequential(*decoder_layers)
-        self.latent = nn.Linear(self.latent_size, 256*8*8)
-
-        self.apply(self.init_weights)
-
-    def init_weights(
-            self,
-            module,
-    ):
-        if isinstance(module, nn.Conv2d):
-            module.weight.data.normal_(0, 0.02)
-            if module.bias is not None:
-                module.bias.data.fill_(0)
-        if isinstance(module, nn.ConvTranspose2d):
-            module.weight.data.normal_(0, 0.02)
-            if module.bias is not None:
-                module.bias.data.fill_(0)
-        if isinstance(module, nn.Linear):
-            nn.init.xavier_normal_(
-                module.weight.data, nn.init.calculate_gain('linear'),
-            )
-            if module.bias is not None:
-                module.bias.data.fill_(0)
+        self.conv_transpose = nn.ConvTranspose1d(
+            self.hidden_size, self.hidden_size,
+            2, 2,
+        )
 
     def forward(
             self,
-            latents,
+            input_tensor,
     ):
-        z = self.latent(latents)
-        x = z.view(-1, 256, 8, 8)
+        x = input_tensor.transpose(1, 2)
+        x = self.conv_transpose(x)
+        return x.transpose(1, 2)
 
-        return self.decoder(x)
+
+class Downsample(nn.Module):
+    def __init__(
+            self,
+            config,
+    ):
+        super(Upsample, self).__init__()
+
+        self.hidden_size = config.get('transformer_hidden_size')
+
+        self.conv = nn.Conv1d(
+            self.hidden_size, self.hidden_size,
+            2, 2,
+        )
+
+    def forward(
+            self,
+            input_tensor,
+    ):
+        x = input_tensor.transpose(1, 2)
+        x = self.conv(x)
+        return x.transpose(1, 2)
 
 
 class Coverage(nn.Module):
@@ -283,7 +254,9 @@ class Coverage(nn.Module):
             input_size, self.embedding_size
         )
 
-        layers = [
+        layers = []
+
+        layers += [
             nn.Linear(self.embedding_size, self.hidden_size),
             Transformer(
                 self.hidden_size,
@@ -305,11 +278,43 @@ class Coverage(nn.Module):
                 self.attention_head_count,
                 self.intermediate_size,
             ),
-            nn.Linear(self.hidden_size, self.latent_size),
+        ]
+
+        k = input_size
+        while k != 256:
+            if k > 256:
+                layers += [Downsample(config)]
+                k = int(k / 2)
+            else:
+                layers += [Upsample(config)]
+                k = int(k * 2)
+
+        layers += [
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            nn.Linear(self.hidden_size, 1),
+            nn.Sigmoid(),
         ]
 
         self.layers = nn.Sequential(*layers)
-        self.decoder = Decoder(config)
 
     def forward(
             self,
@@ -323,8 +328,4 @@ class Coverage(nn.Module):
         embeds = \
             self.input_embedding(inputs) + self.position_embedding(positions)
 
-        latents = self.layers(embeds).sum(1)
-
-        generated = self.decoder(latents).squeeze(1)
-
-        return generated
+        return self.layers(embeds)
