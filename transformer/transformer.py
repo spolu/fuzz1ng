@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import os
+import random
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -10,7 +11,9 @@ from genetic.simple import SimpleFuzzer
 
 from tensorboardX import SummaryWriter
 
-from transformer.model import Coverage
+from torch.distributions.categorical import Categorical
+
+from transformer.model import Coverage, Generator
 
 from utils.config import Config
 from utils.meter import Meter
@@ -58,6 +61,21 @@ class Transformer:
             ),
         )
 
+        self._generator_policy = Generator(
+            self._config,
+            self._runner.dict_size(),
+            self._runner.input_size(),
+        ).to(self._device)
+
+        self._generator_optimizer = optim.Adam(
+            self._generator_policy.parameters(),
+            lr=self._config.get('transformer_learning_rate'),
+            betas=(
+                self._config.get('transformer_adam_beta_1'),
+                self._config.get('transformer_adam_beta_2'),
+            ),
+        )
+
         if self._load_dir:
             self._coverage_policy.load_state_dict(
                 torch.load(
@@ -72,8 +90,21 @@ class Transformer:
                 ),
             )
 
+            self._generator_policy.load_state_dict(
+                torch.load(
+                    self._load_dir + "/generator_policy.pt",
+                    map_location=self._device,
+                ),
+            )
+            self._generator_optimizer.load_state_dict(
+                torch.load(
+                    self._load_dir + "/generator_optimizer.pt",
+                    map_location=self._device,
+                ),
+            )
+
         self._coverage_batch_count = 0
-        self._generate_batch_count = 0
+        self._generator_batch_count = 0
 
         self.reload_datasets()
 
@@ -104,12 +135,12 @@ class Transformer:
             num_workers=0,
         )
 
-    def save_models(
+    def save_coverage(
             self,
     ):
         if self._save_dir:
             Log.out(
-                "Saving models", {
+                "Saving coverage models", {
                     'save_dir': self._save_dir,
                 })
             torch.save(
@@ -119,6 +150,23 @@ class Transformer:
             torch.save(
                 self._coverage_optimizer.state_dict(),
                 self._save_dir + "/coverage_optimizer.pt",
+            )
+
+    def save_generator(
+            self,
+    ):
+        if self._save_dir:
+            Log.out(
+                "Saving generator models", {
+                    'save_dir': self._save_dir,
+                })
+            torch.save(
+                self._generator_policy.state_dict(),
+                self._save_dir + "/generator_policy.pt",
+            )
+            torch.save(
+                self._generator_optimizer.state_dict(),
+                self._save_dir + "/generator_optimizer.pt",
             )
 
     def postprocess_coverages(
@@ -132,6 +180,23 @@ class Transformer:
             torch.zeros(coverages.size()).to(self._device),
         )
         return coverages
+
+    def augment_coverages(
+            self,
+            coverages,
+    ):
+        interpolation = torch.zeros(coverages.size()).to(self._device)
+        for i in range(coverages.size(0)):
+            alpha = random.random()
+            interpolation[i] = \
+                alpha * coverages[i] + (1-alpha) * coverages[i-1]
+        interpolation = torch.where(
+            interpolation > 0,
+            torch.ones(interpolation.size()).to(self._device),
+            torch.zeros(interpolation.size()).to(self._device),
+        )
+
+        return torch.cat((coverages, interpolation), 0)
 
     def batch_train_coverage(self):
         self._coverage_policy.train()
@@ -184,7 +249,7 @@ class Transformer:
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
-                "train/loss/coverage",
+                "train/coverage/loss",
                 loss_meter.avg, self._coverage_batch_count,
             )
 
@@ -214,11 +279,80 @@ class Transformer:
 
         if self._tb_writer is not None:
             self._tb_writer.add_scalar(
-                "test/loss/coverage",
+                "test/coverage/loss",
                 loss_meter.avg, self._coverage_batch_count,
             )
 
         return loss_meter.avg
+
+    def batch_train_generator(self):
+        self._generator_policy.train()
+        loss_meter = Meter()
+        reward_meter = Meter()
+
+        discovered = []
+
+        for it, (inputs, coverages) in enumerate(self._train_loader):
+            target_coverages = self.postprocess_coverages(coverages)
+
+            probs = self._generator_policy(target_coverages.unsqueeze(2))
+
+            m = Categorical(probs)
+            generated = m.sample()
+
+            population = generated.tolist()
+            coverages, _, _ = self._runner.run(population)
+
+            for j in range(len(population)):
+                if self._runs_db.is_new(coverages[j]):
+                    discovered += [(population[j], coverages[j])]
+
+            coverages = torch.cat([
+                torch.FloatTensor(
+                    c.observation(),
+                ).unsqueeze(0).to(self._device)
+                for c in coverages
+            ], 0)
+            coverages = self.postprocess_coverages(coverages)
+
+            reward = 1 / (1 + torch.norm((coverages - target_coverages), 2, 1))
+            loss = -m.log_prob(generated).mean(1) * reward
+            loss = loss.mean()
+
+            self._generator_optimizer.zero_grad()
+            loss.backward()
+            self._generator_optimizer.step()
+
+            loss_meter.update(loss.item())
+            reward_meter.update(reward.mean().item())
+
+        for (input, coverage) in discovered:
+            self._runs_db.store(input, coverage)
+
+        Log.out("GENERATE", {
+            'batch_count': self._generator_batch_count,
+            'loss_avg': loss_meter.avg,
+            'reward_avg': reward_meter.avg,
+            'discovered': len(discovered),
+            # 'loss_min': loss_meter.min,
+            # 'loss_max': loss_meter.max,
+        })
+
+        if self._tb_writer is not None:
+            self._tb_writer.add_scalar(
+                "train/generator/loss",
+                loss_meter.avg, self._generator_batch_count,
+            )
+            self._tb_writer.add_scalar(
+                "train/generator/reward",
+                reward_meter.avg, self._generator_batch_count,
+            )
+            self._tb_writer.add_scalar(
+                "train/generator/discovered",
+                len(discovered), self._generator_batch_count,
+            )
+
+        self._generator_batch_count += 1
 
 
 def train():
@@ -303,15 +437,20 @@ def train():
 
     i = 0
     while True:
-        if args.phase == 'coverage':
-            if i % 10 == 0:
-                transformer.batch_test_coverage()
-                transformer.save_models()
-            transformer.batch_train_coverage()
-
         if args.phase == 'fuzzer':
             fuzzer.cycle()
             if i % 10 == 0:
                 runs_db.dump()
+
+        if args.phase == 'coverage':
+            if i % 10 == 0:
+                transformer.batch_test_coverage()
+                transformer.save_coverage()
+            transformer.batch_train_coverage()
+
+        if args.phase == 'generate':
+            if i % 10 == 0:
+                transformer.save_generator()
+            transformer.batch_train_generator()
 
         i += 1

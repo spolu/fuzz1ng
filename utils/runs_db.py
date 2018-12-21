@@ -81,6 +81,15 @@ class RunsDB:
 
         return False
 
+    def is_new(
+            self,
+            coverage: Coverage,
+    ) -> bool:
+        path = coverage.path_list()[0]
+        if path not in self._pools:
+            return True
+        return False
+
     def store(
             self,
             input: typing.List[int],

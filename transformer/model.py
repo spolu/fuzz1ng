@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def gelu(
@@ -183,6 +184,7 @@ class Transformer(nn.Module):
 
         return block_output
 
+
 class Upsample(nn.Module):
     def __init__(
             self,
@@ -211,7 +213,7 @@ class Downsample(nn.Module):
             self,
             config,
     ):
-        super(Upsample, self).__init__()
+        super(Downsample, self).__init__()
 
         self.hidden_size = config.get('transformer_hidden_size')
 
@@ -240,7 +242,6 @@ class Coverage(nn.Module):
 
         self.device = torch.device(config.get('device'))
 
-        self.latent_size = config.get('transformer_latent_size')
         self.embedding_size = config.get('transformer_embedding_size')
         self.hidden_size = config.get('transformer_hidden_size')
         self.intermediate_size = config.get('transformer_intermediate_size')
@@ -320,12 +321,123 @@ class Coverage(nn.Module):
             self,
             inputs,
     ):
-        positions = torch.arange(
-            inputs.size(1), dtype=torch.long
-        ).to(self.device)
-        positions = positions.unsqueeze(0).expand_as(inputs)
+        return self.forward_embeddings(self.input_embedding(inputs))
 
-        embeds = \
-            self.input_embedding(inputs) + self.position_embedding(positions)
+    def forward_embeddings(
+            self,
+            embeds,
+    ):
+        positions = torch.arange(
+            embeds.size(1), dtype=torch.long
+        ).to(self.device)
+        positions = positions.unsqueeze(0).expand(
+            embeds.size(0), embeds.size(1),
+        )
+
+        embeds = embeds + self.position_embedding(positions)
 
         return self.layers(embeds)
+
+    def retrieve_inputs(
+            self,
+            embeds,
+    ):
+        normalized = self.input_embedding.weight / \
+            torch.norm(self.input_embedding.weight, 2, 0).expand_as(
+                self.input_embedding.weight,
+            )
+        vector = embeds / \
+            torch.norm(embeds, 2, 2).unsqueeze(2).expand_as(embeds)
+
+        return torch.argmax(
+            torch.matmul(
+                vector, normalized.transpose(0, 1)
+            ),
+            2,
+        )
+
+
+class Generator(nn.Module):
+    def __init__(
+            self,
+            config,
+            dict_size,
+            input_size,
+    ):
+        super(Generator, self).__init__()
+
+        self.device = torch.device(config.get('device'))
+
+        self.embedding_size = config.get('transformer_embedding_size')
+        self.hidden_size = config.get('transformer_hidden_size')
+        self.intermediate_size = config.get('transformer_intermediate_size')
+        self.attention_head_count = \
+            config.get('transformer_attention_head_count')
+
+        layers = []
+
+        layers += [
+            nn.Linear(1, self.hidden_size),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+        ]
+
+        k = 256
+        while k != input_size:
+            if k > input_size:
+                layers += [Downsample(config)]
+                k = int(k / 2)
+            else:
+                layers += [Upsample(config)]
+                k = int(k * 2)
+
+        layers += [
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            Transformer(
+                self.hidden_size,
+                self.attention_head_count,
+                self.intermediate_size,
+            ),
+            nn.Linear(self.hidden_size, dict_size),
+            nn.Softmax(2),
+        ]
+
+        self.layers = nn.Sequential(*layers)
+
+    def forward(
+            self,
+            coverages,
+    ):
+        return self.layers(coverages)
